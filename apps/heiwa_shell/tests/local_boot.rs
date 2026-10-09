@@ -207,3 +207,153 @@ fn doctor_reports_heiwa_launch_agents_without_changing_them() {
     // Report-only: the plist is untouched.
     assert_eq!(std::fs::read_to_string(&plist_path).unwrap(), plist);
 }
+
+fn route_event(
+    id: &str,
+    event_type: heiwa_evidence::OperatorEventType,
+    payload: serde_json::Value,
+) -> heiwa_evidence::OperatorEvent {
+    heiwa_evidence::OperatorEvent {
+        schema_version: heiwa_evidence::OPERATOR_EVENT_SCHEMA_VERSION,
+        event_id: id.to_string(),
+        thread_id: "thread-doctor".to_string(),
+        turn_id: Some("turn-doctor".to_string()),
+        run_id: None,
+        call_id: Some(format!("call-{id}")),
+        work_id: None,
+        event_type,
+        occurred_at: "2026-10-01T09:00:00Z".to_string(),
+        actor: heiwa_evidence::OperatorActor {
+            kind: "runtime".to_string(),
+            id: "model-call-executor".to_string(),
+        },
+        risk_class: heiwa_evidence::OperatorRisk::Low,
+        sensitivity: heiwa_evidence::OperatorSensitivity::LocalPrivate,
+        parent_event_id: None,
+        correlation_id: None,
+        source_refs: vec![],
+        evidence_refs: vec![],
+        payload,
+    }
+}
+
+#[test]
+fn doctor_reports_dated_provider_executions_per_channel() {
+    let root = tempfile::tempdir().expect("hermetic doctor root");
+    let home = root.path().join("home");
+    let evidence = root.path().join("evidence");
+    let state = root.path().join("state");
+    let bin = root.path().join("bin");
+    for path in [&home, &evidence, &state, &bin] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    write_fake_executable(&bin.join("gemini"));
+    write_fake_executable(&bin.join("codex"));
+    let journal = heiwa_evidence::OperatorJournal::new(evidence.clone()).unwrap();
+    use heiwa_evidence::OperatorEventType::{RouteCompleted, RouteFailed};
+    journal
+        .append(&route_event(
+            "ollama-ok",
+            RouteCompleted,
+            serde_json::json!({"attempt": 1, "provider": "ollama", "model": "qwen",
+                "channel": {"kind": "local_runtime", "binary": "ollama"}}),
+        ))
+        .unwrap();
+    journal
+        .append(&route_event(
+            "gemini-auth",
+            RouteFailed,
+            serde_json::json!({"attempt": 1, "provider": "gemini", "model": "flash",
+                "failure_class": "authentication", "failure_origin": "provider",
+                "provider_invoked": true, "message": "DOCTOR-MESSAGE-SENTINEL",
+                "channel": {"kind": "oauth_cli", "binary": "gemini"}}),
+        ))
+        .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .env_clear()
+        .env("HOME", &home)
+        .env("HEIWA_EVIDENCE_DIR", &evidence)
+        .env("HEIWA_STATE_DIR", &state)
+        .env("HEIWA_OLLAMA_BASE", "disabled-for-hermetic-tests")
+        .env("PATH", std::env::join_paths([&bin]).unwrap())
+        .args(["doctor", "--json"])
+        .output()
+        .expect("failed to execute doctor");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("DOCTOR-MESSAGE-SENTINEL"), "{stdout}");
+    let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let observations = &report["provider_executions"];
+    assert_eq!(
+        observations["evidence"]["state"], "complete",
+        "{observations}"
+    );
+    assert_eq!(observations["evidence"]["source"], "journal_tail");
+    let rows = observations["observations"].as_array().unwrap();
+    let gemini = rows.iter().find(|row| row["provider"] == "gemini").unwrap();
+    assert_eq!(gemini["latest"], "failure");
+    assert_eq!(gemini["last_failure"]["class"], "authentication");
+    assert_eq!(gemini["last_failure"]["at"], "2026-10-01T09:00:00Z");
+    assert!(rows.iter().all(|row| row["provider"] != "codex"));
+
+    let text = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .env_clear()
+        .env("HOME", &home)
+        .env("HEIWA_EVIDENCE_DIR", &evidence)
+        .env("HEIWA_STATE_DIR", &state)
+        .env("HEIWA_OLLAMA_BASE", "disabled-for-hermetic-tests")
+        .env("PATH", std::env::join_paths([&bin]).unwrap())
+        .arg("doctor")
+        .output()
+        .expect("failed to execute doctor");
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(
+        text.contains("Execution: last failure authentication"),
+        "{text}"
+    );
+    assert!(
+        text.contains("a past success does not prove current readiness"),
+        "{text}"
+    );
+    // A signed-in CLI with no recorded execution is not presented as working.
+    let codex_line = text
+        .lines()
+        .skip_while(|line| !line.trim_start().starts_with("codex:"))
+        .nth(1)
+        .unwrap_or_default();
+    assert!(codex_line.contains("Execution: none observed"), "{text}");
+}
+
+#[test]
+fn doctor_reads_provider_evidence_without_creating_a_journal() {
+    let root = tempfile::tempdir().expect("hermetic doctor root");
+    let home = root.path().join("home");
+    let state = root.path().join("state");
+    let evidence = root.path().join("never-created");
+    for path in [&home, &state] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_heiwa"))
+        .env_clear()
+        .env("HOME", &home)
+        .env("HEIWA_EVIDENCE_DIR", &evidence)
+        .env("HEIWA_STATE_DIR", &state)
+        .env("HEIWA_OLLAMA_BASE", "disabled-for-hermetic-tests")
+        .env("PATH", "/usr/bin:/bin")
+        .args(["doctor", "--json"])
+        .output()
+        .expect("failed to execute doctor");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["provider_executions"]["evidence"]["state"], "empty");
+    assert!(!evidence.exists(), "doctor created the evidence root");
+}

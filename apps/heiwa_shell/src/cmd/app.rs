@@ -4702,7 +4702,8 @@ fn parse_vm_stat_pages(raw: &str, label: &str) -> u64 {
 
 fn provider_rows() -> Vec<Value> {
     let registry = heiwa_provider::AccountRegistry::load();
-    let mut rows = registered_provider_rows(&registry);
+    let observations = provider_execution_view();
+    let mut rows = registered_provider_rows(&registry, &observations);
     rows.extend(["ollama", "gemini", "antigravity", "claude", "codex"]
         .iter()
         .filter(|provider| !registry.accounts.iter().any(|account| match &account.credential {
@@ -4712,7 +4713,12 @@ fn provider_rows() -> Vec<Value> {
         }))
         .filter_map(|provider| heiwa_provider::get_auth_status(provider))
         .map(|account| {
-            json!({
+            let (kind, binary) = if account.provider_id == "ollama" {
+                ("local_runtime", "ollama")
+            } else {
+                ("oauth_cli", account.provider_id.as_str())
+            };
+            let mut row = json!({
                 "provider_id": account.provider_id,
                 "display_name": provider_display_name(&account.provider_id),
                 "auth_kind": auth_kind_label(&account.auth_kind),
@@ -4722,15 +4728,61 @@ fn provider_rows() -> Vec<Value> {
                 "last_validated_at": Value::Null,
                 "last_error": if cockpit_status(&account.status) == "connected" { Value::Null } else { Value::String(account.status.clone()) },
                 "supported_lanes": supported_lanes(&account.provider_id),
-            })
+            });
+            add_execution_fields(&mut row, &observations, kind, None, Some(binary));
+            row
         }));
     rows
 }
 
-fn registered_provider_rows(registry: &heiwa_provider::AccountRegistry) -> Vec<Value> {
+/// Provider execution observations for presentation. The app runtime folds
+/// them incrementally; without it, a bounded journal tail is read.
+fn provider_execution_view() -> heiwa_session::provider_executions::ProviderExecutionView {
+    use heiwa_session::provider_executions::{
+        observe_root_tail, DEFAULT_TAIL_BYTES, DEFAULT_TAIL_EVENTS,
+    };
+    if let Ok(runtime) = crate::default_model_call_runtime() {
+        if let Ok(view) = runtime.sessions.provider_executions() {
+            return view;
+        }
+    }
+    match heiwa_evidence::journal_root() {
+        Ok(root) => observe_root_tail(&root, DEFAULT_TAIL_BYTES, DEFAULT_TAIL_EVENTS),
+        Err(_) => heiwa_session::provider_executions::unavailable("evidence_root"),
+    }
+}
+
+/// Additive, dated execution facts for one provider row: the latest
+/// observed success and failure on the matching channel. Authentication
+/// fields such as `last_validated_at` and `status` are left untouched; a
+/// dated success is not a current readiness claim.
+fn add_execution_fields(
+    row: &mut Value,
+    view: &heiwa_session::provider_executions::ProviderExecutionView,
+    kind: &str,
+    account_id: Option<&str>,
+    binary: Option<&str>,
+) {
+    let observed = view.observations.iter().find(|observation| {
+        observation.channel.kind == kind
+            && account_id.is_none_or(|id| observation.channel.account_id.as_deref() == Some(id))
+            && binary.is_none_or(|name| observation.channel.binary.as_deref() == Some(name))
+    });
+    let success = observed.and_then(|observation| observation.last_success.as_ref());
+    let failure = observed.and_then(|observation| observation.last_failure.as_ref());
+    row["execution_evidence"] = json!(view.evidence.state);
+    row["last_execution_success_at"] = json!(success.map(|seen| &seen.at));
+    row["last_execution_failure_at"] = json!(failure.map(|seen| &seen.at));
+    row["last_execution_failure_class"] = json!(failure.map(|seen| &seen.class));
+}
+
+fn registered_provider_rows(
+    registry: &heiwa_provider::AccountRegistry,
+    observations: &heiwa_session::provider_executions::ProviderExecutionView,
+) -> Vec<Value> {
     registry.accounts.iter().map(|account| {
         let health = heiwa_provider::health::AccountHealth::project(account);
-        json!({
+        let mut row = json!({
             "provider_id": account.provider,
             "account_id": account.account_id,
             "display_name": provider_display_name(&account.provider),
@@ -4743,13 +4795,117 @@ fn registered_provider_rows(registry: &heiwa_provider::AccountRegistry) -> Vec<V
             "last_error": if health.routable { None } else { Some("Check this connection in Resources.") },
             "supported_lanes": [account.credential.kind_label()],
             "source": "account_registry",
-        })
+        });
+        let kind = account.credential.kind_label();
+        match &account.credential {
+            heiwa_provider::Credential::OauthCli { binary } => {
+                add_execution_fields(&mut row, observations, kind, None, Some(binary))
+            }
+            heiwa_provider::Credential::LocalRuntime { .. } => {
+                add_execution_fields(&mut row, observations, kind, None, Some(&account.provider))
+            }
+            _ => add_execution_fields(&mut row, observations, kind, Some(&account.account_id), None),
+        }
+        row
     }).collect()
 }
 
 #[cfg(test)]
 mod provider_projection_tests {
     use super::*;
+    fn no_observations() -> heiwa_session::provider_executions::ProviderExecutionView {
+        heiwa_session::provider_executions::observe_root_tail(
+            std::path::Path::new("/nonexistent-heiwa-evidence"),
+            0,
+            0,
+        )
+    }
+
+    fn observed(
+        events: &[(heiwa_evidence::OperatorEventType, serde_json::Value)],
+    ) -> heiwa_session::provider_executions::ProviderExecutionView {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = heiwa_evidence::OperatorJournal::new(dir.path().into()).unwrap();
+        for (index, (event_type, payload)) in events.iter().enumerate() {
+            journal
+                .append(&heiwa_evidence::OperatorEvent {
+                    schema_version: heiwa_evidence::OPERATOR_EVENT_SCHEMA_VERSION,
+                    event_id: format!("evt-{index}"),
+                    thread_id: "thread".into(),
+                    turn_id: Some("turn".into()),
+                    run_id: None,
+                    call_id: Some("call".into()),
+                    work_id: None,
+                    event_type: event_type.clone(),
+                    occurred_at: format!("2026-10-08T10:0{index}:00Z"),
+                    actor: heiwa_evidence::OperatorActor {
+                        kind: "runtime".into(),
+                        id: "model-call-executor".into(),
+                    },
+                    risk_class: heiwa_evidence::OperatorRisk::Low,
+                    sensitivity: heiwa_evidence::OperatorSensitivity::LocalPrivate,
+                    parent_event_id: None,
+                    correlation_id: None,
+                    source_refs: vec![],
+                    evidence_refs: vec![],
+                    payload: payload.clone(),
+                })
+                .unwrap();
+        }
+        heiwa_session::provider_executions::observe_root_tail(dir.path(), 1 << 20, 100)
+    }
+
+    #[test]
+    fn execution_fields_match_only_the_channel_that_ran_and_keep_auth_fields() {
+        use heiwa_evidence::OperatorEventType::{RouteCompleted, RouteFailed};
+        let view = observed(&[
+            (
+                RouteCompleted,
+                json!({"provider": "codex", "model": "m", "channel": {"kind": "api_key", "account_id": "openai-api-seat"}}),
+            ),
+            (
+                RouteFailed,
+                json!({"provider": "gemini", "model": "m", "failure_class": "quota_exhausted",
+                    "provider_invoked": true, "failure_origin": "provider",
+                    "channel": {"kind": "oauth_cli", "binary": "gemini"}}),
+            ),
+        ]);
+        let account = |id: &str| heiwa_provider::ProviderAccount {
+            account_id: id.into(),
+            provider: "openai".into(),
+            credential: heiwa_provider::Credential::ApiKey,
+            rate_group: "openai_api".into(),
+            status: heiwa_provider::AccountStatus::Connected,
+            models: vec![],
+        };
+        let registry = heiwa_provider::AccountRegistry::from_accounts(vec![
+            account("openai-api-seat"),
+            account("openai-api-other"),
+        ]);
+        let rows = registered_provider_rows(&registry, &view);
+        assert_eq!(rows[0]["last_execution_success_at"], "2026-10-08T10:00:00Z");
+        assert_eq!(rows[0]["execution_evidence"], "complete");
+        // Another account of the same vendor inherits nothing.
+        assert!(rows[1]["last_execution_success_at"].is_null());
+        assert!(rows[0]["last_validated_at"].is_null());
+
+        let mut cli = json!({"status": "connected", "last_validated_at": null});
+        add_execution_fields(&mut cli, &view, "oauth_cli", None, Some("gemini"));
+        assert_eq!(cli["status"], "connected");
+        assert!(cli["last_execution_success_at"].is_null());
+        assert_eq!(cli["last_execution_failure_class"], "quota_exhausted");
+
+        let mut absent = json!({});
+        add_execution_fields(
+            &mut absent,
+            &no_observations(),
+            "oauth_cli",
+            None,
+            Some("gemini"),
+        );
+        assert_eq!(absent["execution_evidence"], "empty");
+    }
+
     #[test]
     fn api_connections_appear_without_fabricated_probe_time_or_provider_error_text() {
         let registry =
@@ -4761,7 +4917,7 @@ mod provider_projection_tests {
                 status: heiwa_provider::AccountStatus::Error("private provider response".into()),
                 models: vec![],
             }]);
-        let rows = registered_provider_rows(&registry);
+        let rows = registered_provider_rows(&registry, &no_observations());
         assert_eq!(rows[0]["account_id"], "openai-api-seat");
         assert_eq!(rows[0]["display_name"], "OpenAI");
         assert_eq!(rows[0]["status"], "degraded");

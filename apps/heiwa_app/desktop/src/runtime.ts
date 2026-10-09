@@ -58,6 +58,15 @@ export type ProviderSnapshot = {
   supported_lanes: string[];
   last_error: string | null;
   last_validated_at: string | null;
+  /**
+   * Dated execution facts from operator evidence, matched to this row's
+   * channel. They are observations, not readiness: absent on older runtimes,
+   * and a past success does not mean the provider works now.
+   */
+  execution_evidence?: "complete" | "partial" | "empty" | "unavailable";
+  last_execution_success_at?: string | null;
+  last_execution_failure_at?: string | null;
+  last_execution_failure_class?: string | null;
 };
 
 export type ResourceSnapshot = {
@@ -468,6 +477,19 @@ export function runtimeStatus(health: RuntimeHealth | null): string {
 
 export function providersFromSnapshot(health: RuntimeHealth | null): ProviderSnapshot[] {
   return health?.snapshot?.data?.providers ?? [];
+}
+
+/**
+ * Providers with sign-in or connection presence, and how many of those have
+ * a recorded successful run on their own channel. Presence alone is not
+ * presented as a working provider.
+ */
+export function providerPresence(providers: ProviderSnapshot[]): { connected: number; withRuns: number } {
+  const connected = providers.filter((provider) => provider.status === "connected");
+  return {
+    connected: connected.length,
+    withRuns: connected.filter((provider) => Boolean(provider.last_execution_success_at)).length,
+  };
 }
 
 export function resourceFromSnapshot(health: RuntimeHealth | null): ResourceSnapshot | null {

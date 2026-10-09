@@ -112,6 +112,10 @@ impl ProviderAdapter for ClaudeCodeCliAdapter {
             "claude-haiku-4-5".to_string(),
         ]
     }
+
+    fn execution_channel(&self) -> crate::adapter::ExecutionChannel {
+        crate::adapter::ExecutionChannel::cli("claude")
+    }
 }
 
 fn extract_usage(result: &serde_json::Value) -> TokenUsage {

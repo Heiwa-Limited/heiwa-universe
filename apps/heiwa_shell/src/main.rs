@@ -376,6 +376,13 @@ async fn main() -> Result<()> {
             let layout = heiwa_install::check_runtime_layout();
             let launchd = heiwa_install::check_launchd_health();
             let evidence_dir = heiwa_evidence::journal_root()?;
+            // Doctor reads its own profile's bounded journal tail; it never
+            // borrows another process's read model.
+            let provider_executions = heiwa_session::provider_executions::observe_root_tail(
+                &evidence_dir,
+                heiwa_session::provider_executions::DEFAULT_TAIL_BYTES,
+                heiwa_session::provider_executions::DEFAULT_TAIL_EVENTS,
+            );
             let evidence_streams = heiwa_evidence::journal_summary(&evidence_dir)
                 .unwrap_or_default()
                 .into_iter()
@@ -439,6 +446,7 @@ async fn main() -> Result<()> {
                         "heiwa_app": app_probe,
                         "layout": layout,
                         "launchd": launchd,
+                        "provider_executions": provider_executions,
                         "evidence": evidence_status,
                         "ai_ops": ai_ops,
                     })
@@ -507,6 +515,7 @@ async fn main() -> Result<()> {
                 }
             }
             println!();
+            let now = chrono::Utc::now();
             println!("CLI Discovery (auth presence only):");
             println!("  A provider CLI can be signed in here while its Heiwa account");
             println!("  above is still unlinked — these answer different questions.");
@@ -520,6 +529,10 @@ async fn main() -> Result<()> {
                 };
                 let label = format!("{}:", status.provider_id);
                 println!("  {:<12} {} ({})", label, status.status, kind);
+                println!(
+                    "               Execution: {}",
+                    cli_execution_note(&provider_executions, &status.provider_id, now)
+                );
                 let hint = match status.status.as_str() {
                     "installed_unverified" => {
                         Some(format!("heiwa auth login {}", status.provider_id))
@@ -577,6 +590,9 @@ async fn main() -> Result<()> {
 
             println!();
             print_launchd_health(&launchd);
+
+            println!();
+            print_provider_executions(&provider_executions, now);
 
             println!();
             println!("Evidence:");
@@ -1051,6 +1067,176 @@ async fn run_route_command(args: &[String]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Dated provider execution facts from this profile's operator journal.
+/// Each line is an observation with its age, never a readiness verdict.
+fn print_provider_executions(
+    view: &heiwa_session::provider_executions::ProviderExecutionView,
+    now: chrono::DateTime<chrono::Utc>,
+) {
+    use heiwa_session::provider_executions::{EvidenceState, LatestOutcome};
+    let evidence = &view.evidence;
+    let state = match evidence.state {
+        EvidenceState::Complete => "complete",
+        EvidenceState::Partial => "partial",
+        EvidenceState::Empty => "empty",
+        EvidenceState::Unavailable => "unavailable",
+    };
+    println!("Provider Executions (operator journal, {state}):");
+    for row in &view.observations {
+        let identity = row
+            .channel
+            .account_id
+            .as_deref()
+            .or(row.channel.binary.as_deref())
+            .map(|id| format!(" {id}"))
+            .unwrap_or_default();
+        let channel = format!("{}{identity}", row.channel.kind);
+        let success = row
+            .last_success
+            .as_ref()
+            .map(|seen| format!("last success {} ({})", seen.at, observed_age(&seen.at, now)))
+            .unwrap_or_else(|| "no success recorded".to_string());
+        let failure = row
+            .last_failure
+            .as_ref()
+            .map(|seen| {
+                let origin = if seen.origin == "provider" {
+                    ""
+                } else {
+                    ", origin unverified"
+                };
+                format!(
+                    "last failure {} {} ({}{origin})",
+                    seen.class,
+                    seen.at,
+                    observed_age(&seen.at, now)
+                )
+            })
+            .unwrap_or_else(|| "no failure recorded".to_string());
+        let latest = match row.latest {
+            LatestOutcome::Success => "success",
+            LatestOutcome::Failure => "failure",
+        };
+        println!("  {:<11} {channel}", row.provider);
+        println!("  {:<11} {success}; {failure}; latest {latest}", "");
+    }
+    if !view.open_attempts.is_empty() {
+        println!(
+            "  {} attempt(s) without a recorded outcome (in flight or interrupted)",
+            view.open_attempts.len()
+        );
+    }
+    match evidence.state {
+        EvidenceState::Empty => println!("  No operator journal on this profile yet."),
+        EvidenceState::Unavailable => println!(
+            "  Evidence unavailable ({}); nothing can be said about executions.",
+            evidence.error.unwrap_or("unknown")
+        ),
+        EvidenceState::Partial => println!(
+            "  Partial evidence: {} events inspected{}{}; an absent observation is not an absent execution.",
+            evidence.events_inspected,
+            evidence
+                .window_from
+                .as_deref()
+                .map(|from| format!(" since {from}"))
+                .unwrap_or_default(),
+            if evidence.skipped_lines > 0 {
+                format!(", {} damaged line(s)", evidence.skipped_lines)
+            } else {
+                String::new()
+            }
+        ),
+        EvidenceState::Complete if view.observations.is_empty() => {
+            println!("  No provider execution recorded on this profile.")
+        }
+        EvidenceState::Complete => {}
+    }
+    println!("  Observations are dated facts; a past success does not prove current readiness.");
+}
+
+/// One-line execution context for a CLI Discovery row.
+fn cli_execution_note(
+    view: &heiwa_session::provider_executions::ProviderExecutionView,
+    provider_id: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    use heiwa_session::provider_executions::EvidenceState;
+    let kind = if provider_id == "ollama" {
+        "local_runtime"
+    } else {
+        "oauth_cli"
+    };
+    let row = view
+        .observations
+        .iter()
+        .find(|row| row.channel.kind == kind && row.channel.binary.as_deref() == Some(provider_id));
+    match (row, view.evidence.state) {
+        (_, EvidenceState::Unavailable) => "evidence unavailable".to_string(),
+        (Some(row), _) => {
+            let success = row
+                .last_success
+                .as_ref()
+                .map(|seen| format!("last success {}", observed_age(&seen.at, now)));
+            let failure = row.last_failure.as_ref().map(|seen| {
+                format!(
+                    "last failure {} {}",
+                    seen.class,
+                    observed_age(&seen.at, now)
+                )
+            });
+            [success, failure]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join("; ")
+        }
+        (None, state) => {
+            let scope = if state == EvidenceState::Partial {
+                "none observed in the inspected window"
+            } else {
+                "none observed"
+            };
+            // Rows written before channel provenance cannot be attributed to
+            // this CLI, but they should not be hidden either.
+            match view
+                .observations
+                .iter()
+                .find(|row| row.provider == provider_id && row.channel.kind == "unknown")
+            {
+                Some(legacy) => format!(
+                    "{scope} on this channel; {} unattributed observation(s), latest {}",
+                    legacy.successes + legacy.failures,
+                    legacy
+                        .last_success
+                        .iter()
+                        .map(|seen| &seen.at)
+                        .chain(legacy.last_failure.iter().map(|seen| &seen.at))
+                        .max()
+                        .map(|at| observed_age(at, now))
+                        .unwrap_or_default()
+                ),
+                None => scope.to_string(),
+            }
+        }
+    }
+}
+
+/// Human age of an observation, e.g. `3d ago`. Unparseable or future times
+/// are shown as such rather than guessed.
+fn observed_age(at: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+    let Ok(at) = chrono::DateTime::parse_from_rfc3339(at) else {
+        return "time unreadable".to_string();
+    };
+    let seconds = now.signed_duration_since(at).num_seconds();
+    match seconds {
+        ..=-61 => "in the future".to_string(),
+        -60..=59 => "just now".to_string(),
+        60..=3_599 => format!("{}m ago", seconds / 60),
+        3_600..=172_799 => format!("{}h ago", seconds / 3_600),
+        _ => format!("{}d ago", seconds / 86_400),
+    }
 }
 
 /// Report-only; doctor never changes launchd state.

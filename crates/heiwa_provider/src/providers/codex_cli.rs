@@ -81,6 +81,10 @@ impl ProviderAdapter for CodexCliAdapter {
             "o3".to_string(),
         ]
     }
+
+    fn execution_channel(&self) -> crate::adapter::ExecutionChannel {
+        crate::adapter::ExecutionChannel::cli("codex")
+    }
 }
 
 async fn run_codex(

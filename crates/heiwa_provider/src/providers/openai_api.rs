@@ -362,6 +362,10 @@ impl ProviderAdapter for OpenAiApiAdapter {
     fn supported_models(&self) -> Vec<String> {
         self.models.clone()
     }
+
+    fn execution_channel(&self) -> crate::adapter::ExecutionChannel {
+        crate::adapter::ExecutionChannel::api_key(&self.account_id)
+    }
 }
 
 #[cfg(test)]

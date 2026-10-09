@@ -13,7 +13,9 @@ mod model_call {
     use heiwa_evidence::{OperatorEventType, OperatorJournal};
     use heiwa_loop::{LoopCallRequest, LoopConfig, LoopController, LoopModelCaller};
     use heiwa_protocol::ModelTier;
-    use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent, TokenUsage};
+    use heiwa_provider::adapter::{
+        ExecutionChannel, Message, ProviderAdapter, Role, StreamEvent, TokenUsage,
+    };
     use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
     use heiwa_shell::model_calls::{
         ExecutorLoopCaller, ModelCallAttemptOutcome, ModelCallError, ModelCallExecution,
@@ -1421,5 +1423,143 @@ mod model_call {
             0,
             "duplicate admission must not invoke provider"
         );
+    }
+
+    /// Completes with a fixed usage and reports an API-key channel.
+    struct ChannelAdapter {
+        usage: TokenUsage,
+    }
+
+    #[async_trait]
+    impl ProviderAdapter for ChannelAdapter {
+        async fn send(
+            &self,
+            _model: &str,
+            _messages: &[Message],
+            stream_tx: mpsc::Sender<StreamEvent>,
+        ) -> Result<()> {
+            stream_tx
+                .send(StreamEvent::Done(self.usage.clone()))
+                .await?;
+            Ok(())
+        }
+
+        async fn interrupt(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn supported_models(&self) -> Vec<String> {
+            vec![]
+        }
+
+        fn execution_channel(&self) -> ExecutionChannel {
+            ExecutionChannel::api_key("google-api-7")
+        }
+    }
+
+    fn route_payloads(
+        service: &OperatorSessionService,
+        cursor: &str,
+    ) -> Vec<(OperatorEventType, serde_json::Value)> {
+        service
+            .events_after("thread-1", Some(cursor), 50)
+            .unwrap()
+            .events
+            .into_iter()
+            .filter(|row| {
+                matches!(
+                    row.event.event_type,
+                    OperatorEventType::RouteCompleted | OperatorEventType::RouteFailed
+                )
+            })
+            .map(|row| (row.event.event_type, row.event.payload))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn route_outcomes_record_the_executed_channel_and_who_failed() {
+        let (_evidence, service, submission) = service_and_turn();
+        let failing = Arc::new(CountingErrorAdapter {
+            sends: Arc::new(AtomicUsize::new(0)),
+            error: "unavailable".to_string(),
+            sabotage_stream: None,
+        }) as Arc<dyn ProviderAdapter>;
+        let ok = Arc::new(ChannelAdapter {
+            usage: TokenUsage::default(),
+        }) as Arc<dyn ProviderAdapter>;
+        let executor = ModelCallExecutor::new(
+            Arc::new(move |provider, _| match provider {
+                "failing" => Some(failing.clone()),
+                "ok" => Some(ok.clone()),
+                _ => None,
+            }),
+            service.clone(),
+        );
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        executor
+            .execute(execution(
+                request("thread-1", &submission.turn_id),
+                vec![
+                    candidate(1, "missing", "missing-model", 0.01),
+                    candidate(2, "failing", "failing-model", 0.02),
+                    candidate(3, "ok", "ok-model", 0.03),
+                ],
+                3,
+                cancel_rx,
+            ))
+            .await
+            .unwrap();
+
+        let routes = route_payloads(&service, &submission.cursor);
+        assert_eq!(routes.len(), 3, "{routes:?}");
+        let (kind, resolver_miss) = &routes[0];
+        assert_eq!(*kind, OperatorEventType::RouteFailed);
+        assert_eq!(resolver_miss["provider"], "missing");
+        assert_eq!(resolver_miss["provider_invoked"], false);
+        assert_eq!(resolver_miss["failure_origin"], "resolver");
+        assert_eq!(resolver_miss["channel"]["kind"], "unknown");
+
+        let (kind, provider_failure) = &routes[1];
+        assert_eq!(*kind, OperatorEventType::RouteFailed);
+        assert_eq!(provider_failure["provider_invoked"], true);
+        assert_eq!(provider_failure["failure_origin"], "provider");
+        // An adapter that does not declare its channel stays unknown.
+        assert_eq!(provider_failure["channel"]["kind"], "unknown");
+
+        let (kind, completed) = &routes[2];
+        assert_eq!(*kind, OperatorEventType::RouteCompleted);
+        assert_eq!(
+            completed["channel"],
+            serde_json::json!({"kind": "api_key", "account_id": "google-api-7"})
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unpriceable_provider_response_is_an_accounting_failure() {
+        let (_evidence, service, submission) = service_and_turn();
+        let adapter = Arc::new(ChannelAdapter {
+            usage: TokenUsage {
+                cost_usd: -1.0,
+                ..TokenUsage::default()
+            },
+        }) as Arc<dyn ProviderAdapter>;
+        let executor =
+            ModelCallExecutor::new(Arc::new(move |_, _| Some(adapter.clone())), service.clone());
+        let (_cancel_tx, cancel_rx) = watch::channel(false);
+        let _ = executor
+            .execute(execution(
+                request("thread-1", &submission.turn_id),
+                vec![candidate(1, "gemini", "gemini-model", 0.01)],
+                1,
+                cancel_rx,
+            ))
+            .await;
+
+        let routes = route_payloads(&service, &submission.cursor);
+        let (kind, failure) = &routes[0];
+        assert_eq!(*kind, OperatorEventType::RouteFailed);
+        assert_eq!(failure["failure_origin"], "accounting");
+        assert_eq!(failure["provider_invoked"], true);
+        assert_eq!(failure["channel"]["account_id"], "google-api-7");
     }
 }

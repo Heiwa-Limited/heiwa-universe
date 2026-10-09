@@ -116,6 +116,10 @@ impl ProviderAdapter for OllamaCliAdapter {
     fn supported_models(&self) -> Vec<String> {
         vec![self.default_model.clone()]
     }
+
+    fn execution_channel(&self) -> crate::adapter::ExecutionChannel {
+        crate::adapter::ExecutionChannel::local_runtime("ollama")
+    }
 }
 
 /// Strips reasoning traces that Ollama models emit inline.

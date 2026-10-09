@@ -10,7 +10,9 @@ use heiwa_evidence::{
     now_iso, CursorEvent, OperatorActor, OperatorEvent, OperatorEventType, OperatorRisk,
     OperatorSensitivity, OPERATOR_EVENT_SCHEMA_VERSION,
 };
-use heiwa_provider::adapter::{Message, ProviderAdapter, StreamEvent, TokenUsage};
+use heiwa_provider::adapter::{
+    ExecutionChannel, Message, ProviderAdapter, StreamEvent, TokenUsage,
+};
 use heiwa_session::operator::{OperatorSessionService, StartTurnRequest};
 use serde_json::json;
 use tokio::sync::{mpsc, watch};
@@ -143,8 +145,32 @@ impl fmt::Display for ModelCallError {
 
 impl std::error::Error for ModelCallError {}
 
+/// Who a recorded attempt failure belongs to. Only `Provider` failures are
+/// evidence about the provider; a resolver miss never reached it and an
+/// accounting failure followed a provider response Heiwa could not price.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailureOrigin {
+    Provider,
+    Resolver,
+    Accounting,
+}
+
+impl FailureOrigin {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Provider => "provider",
+            Self::Resolver => "resolver",
+            Self::Accounting => "accounting",
+        }
+    }
+}
+
 struct FailedRouteAttempt<'a> {
     candidate: &'a ModelCallCandidate,
+    /// The adapter channel that ran, or `None` when no adapter was resolved.
+    channel: Option<&'a ExecutionChannel>,
+    provider_invoked: bool,
+    origin: FailureOrigin,
     attempt: usize,
     failure: &'a (ProviderFailureClass, String),
     cost_usd: Option<f64>,
@@ -235,6 +261,9 @@ impl ModelCallExecutor {
                     &execution.request,
                     FailedRouteAttempt {
                         candidate: &candidate,
+                        channel: None,
+                        provider_invoked: false,
+                        origin: FailureOrigin::Resolver,
                         attempt: attempts,
                         failure: &failure,
                         cost_usd: attempt_cost,
@@ -259,6 +288,7 @@ impl ModelCallExecutor {
                 continue;
             };
 
+            let channel = adapter.execution_channel();
             let started = Instant::now();
             match run_adapter(
                 adapter,
@@ -288,6 +318,9 @@ impl ModelCallExecutor {
                                 &execution.request,
                                 FailedRouteAttempt {
                                     candidate: &candidate,
+                                    channel: Some(&channel),
+                                    provider_invoked: true,
+                                    origin: FailureOrigin::Accounting,
                                     attempt: attempts,
                                     failure: &failure,
                                     cost_usd: attempt_cost,
@@ -354,6 +387,7 @@ impl ModelCallExecutor {
                             "provider": provider,
                             "model": model_id,
                             "provider_model": provider_model_id,
+                            "channel": channel,
                             "usage": usage,
                             "latency_ms": started.elapsed().as_millis(),
                             "cost_usd": charged_cost.0,
@@ -384,6 +418,7 @@ impl ModelCallExecutor {
                     self.append_cancelled_attempt(
                         &execution.request,
                         &candidate,
+                        &channel,
                         attempts,
                         attempt_cost,
                         &attempt_truth,
@@ -401,6 +436,9 @@ impl ModelCallExecutor {
                         &execution.request,
                         FailedRouteAttempt {
                             candidate: &candidate,
+                            channel: Some(&channel),
+                            provider_invoked: true,
+                            origin: FailureOrigin::Provider,
                             attempt: attempts,
                             failure: &failure,
                             cost_usd: attempt_cost,
@@ -520,6 +558,9 @@ impl ModelCallExecutor {
                 "provider": failed.candidate.tier.provider,
                 "model": failed.candidate.tier.model_id,
                 "provider_model": failed.candidate.tier.provider_model_id,
+                "channel": failed.channel.cloned().unwrap_or_else(ExecutionChannel::unknown),
+                "provider_invoked": failed.provider_invoked,
+                "failure_origin": failed.origin.as_str(),
                 "failure_class": failed.failure.0.as_str(),
                 "message": failed.failure.1,
                 "cost_usd": failed.cost_usd,
@@ -533,6 +574,7 @@ impl ModelCallExecutor {
         &self,
         request: &ModelCallRequest,
         candidate: &ModelCallCandidate,
+        channel: &ExecutionChannel,
         attempt: usize,
         cost_usd: Option<f64>,
         cost_truth: &CostTruth,
@@ -546,6 +588,8 @@ impl ModelCallExecutor {
                 "provider": candidate.tier.provider,
                 "model": candidate.tier.model_id,
                 "provider_model": candidate.tier.provider_model_id,
+                "channel": channel,
+                "failure_origin": FailureOrigin::Provider.as_str(),
                 "failure_class": ProviderFailureClass::Cancelled.as_str(),
                 "message": "provider attempt interrupted before completion truth",
                 "outcome": "uncertain",

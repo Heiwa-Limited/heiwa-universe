@@ -209,6 +209,34 @@ pub struct OperatorPage {
     pub skipped_lines: usize,
 }
 
+/// The newest operator events within a bounded byte window at the end of
+/// the stream. See [`OperatorJournal::read_tail`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperatorTail {
+    /// Newest valid events in the window, in append order. Each cursor is
+    /// compatible with [`OperatorJournal::read_after`].
+    pub events: Vec<CursorEvent>,
+    /// Whether the stream file exists. `false` means nothing was ever
+    /// recorded on this root, which is different from an empty window.
+    pub stream_present: bool,
+    /// The window began after byte 0, so older events were not inspected.
+    pub starts_mid_stream: bool,
+    /// Valid events in the window that were dropped because the newest
+    /// `max_events` were kept.
+    pub dropped_events: usize,
+    /// Unparseable or torn lines inside the window.
+    pub skipped_lines: usize,
+    /// Bytes of the stream examined for this window (excluding lineage work).
+    pub window_bytes: u64,
+}
+
+impl OperatorTail {
+    /// Every event in the stream was inspected and none was damaged.
+    pub fn is_complete(&self) -> bool {
+        !self.starts_mid_stream && self.dropped_events == 0 && self.skipped_lines == 0
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CursorError {
     #[error("invalid_cursor: {reason}")]
@@ -484,6 +512,158 @@ impl OperatorJournal {
 
         unreachable!("bounded lineage retry loop always returns")
     }
+
+    /// The newest valid events in the last `max_bytes` of the stream, keeping
+    /// at most `max_events` (the newest ones). Never takes the append lock.
+    ///
+    /// A window that starts mid-stream discards the partial first line and
+    /// reports `starts_mid_stream`; a window inside one large envelope yields
+    /// no events rather than a fabricated empty stream. Corrupt and torn rows
+    /// count as `skipped_lines` under the same budgets as [`Self::read_after`],
+    /// and the lineage fingerprint is revalidated after reading, retrying up
+    /// to the same bounded attempt count.
+    ///
+    /// Read bound per attempt: `max_bytes` of window plus two lineage
+    /// fingerprints (each at most the corrupt-scan budget plus one envelope)
+    /// plus one byte for boundary alignment; at most
+    /// `MAX_OPERATOR_LINEAGE_READ_ATTEMPTS` attempts.
+    pub fn read_tail(
+        &self,
+        max_bytes: u64,
+        max_events: usize,
+    ) -> Result<OperatorTail, CursorError> {
+        let path = stream_path(&self.dir, OPERATOR_STREAM_KIND);
+        for attempt in 1..=MAX_OPERATOR_LINEAGE_READ_ATTEMPTS {
+            let _ = attempt;
+            let file_len = match std::fs::metadata(&path) {
+                Ok(meta) => meta.len(),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(OperatorTail {
+                        events: Vec::new(),
+                        stream_present: false,
+                        starts_mid_stream: false,
+                        dropped_events: 0,
+                        skipped_lines: 0,
+                        window_bytes: 0,
+                    });
+                }
+                Err(err) => return Err(CursorError::Storage(err.into())),
+            };
+            let fingerprint = first_line_fingerprint(&path)?;
+
+            #[cfg(test)]
+            run_read_after_snapshot_hook(attempt);
+
+            let tail = read_tail_window(&path, file_len, max_bytes, max_events, &fingerprint)?;
+            if first_line_fingerprint(&path)? == fingerprint {
+                return Ok(tail);
+            }
+        }
+        Err(CursorError::UnstableLineage {
+            attempts: MAX_OPERATOR_LINEAGE_READ_ATTEMPTS,
+        })
+    }
+}
+
+fn read_tail_window(
+    path: &Path,
+    file_len: u64,
+    max_bytes: u64,
+    max_events: usize,
+    fingerprint: &str,
+) -> Result<OperatorTail> {
+    let mut file = match OpenOptions::new().read(true).open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(OperatorTail {
+                events: Vec::new(),
+                stream_present: false,
+                starts_mid_stream: false,
+                dropped_events: 0,
+                skipped_lines: 0,
+                window_bytes: 0,
+            })
+        }
+        Err(err) => return Err(err.into()),
+    };
+    let start = file_len.saturating_sub(max_bytes);
+    // A window starting right after a newline begins on an envelope boundary.
+    let aligned = start == 0 || {
+        file.seek(SeekFrom::Start(start - 1))?;
+        let mut preceding = [0u8; 1];
+        file.read_exact(&mut preceding)?;
+        preceding[0] == b'\n'
+    };
+    file.seek(SeekFrom::Start(start))?;
+    let mut reader = std::io::BufReader::new(file.take(file_len - start));
+    let mut offset = start;
+    let mut line = Vec::new();
+    if !aligned {
+        // Discard the remainder of an envelope that began before the window.
+        match read_capped_line(&mut reader, &mut line)? {
+            CappedLine::Complete => offset += line.len() as u64,
+            CappedLine::Eof | CappedLine::Torn => {
+                return Ok(OperatorTail {
+                    events: Vec::new(),
+                    stream_present: true,
+                    starts_mid_stream: true,
+                    dropped_events: 0,
+                    skipped_lines: 0,
+                    window_bytes: file_len - start,
+                })
+            }
+        }
+    }
+
+    let mut events = std::collections::VecDeque::new();
+    let mut dropped_events = 0usize;
+    let mut skipped_lines = 0usize;
+    let mut corrupt_budget = CorruptScanBudget::default();
+    loop {
+        match read_capped_line(&mut reader, &mut line)? {
+            CappedLine::Eof => break,
+            CappedLine::Torn => {
+                skipped_lines += 1;
+                corrupt_budget.record(line.len())?;
+                break;
+            }
+            CappedLine::Complete => {
+                offset += line.len() as u64;
+                match parse_operator_line(&line[..line.len() - 1]) {
+                    Some(event) => {
+                        if events.len() == max_events {
+                            if max_events == 0 {
+                                dropped_events += 1;
+                                continue;
+                            }
+                            events.pop_front();
+                            dropped_events += 1;
+                        }
+                        events.push_back(CursorEvent {
+                            cursor: encode_cursor(&OperatorCursor {
+                                version: OPERATOR_CURSOR_VERSION,
+                                fingerprint: fingerprint.to_string(),
+                                offset,
+                            }),
+                            event,
+                        });
+                    }
+                    None => {
+                        skipped_lines += 1;
+                        corrupt_budget.record(line.len())?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(OperatorTail {
+        events: events.into(),
+        stream_present: true,
+        starts_mid_stream: start > 0,
+        dropped_events,
+        skipped_lines,
+        window_bytes: file_len - start,
+    })
 }
 
 /// Under the writer locks, remove only bytes after the last complete newline.
@@ -928,12 +1108,150 @@ mod lineage_race_tests {
             Err(CursorError::UnstableLineage { attempts: 3 })
         ));
     }
+
+    fn tail_event(id: &str, text: &str) -> OperatorEvent {
+        let mut event = test_event(id);
+        event.payload = json!({ "text": text });
+        event
+    }
+
+    fn tail_ids(tail: &OperatorTail) -> Vec<&str> {
+        tail.events
+            .iter()
+            .map(|row| row.event.event_id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn tail_of_a_missing_stream_is_not_present_rather_than_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        let tail = journal.read_tail(4096, 10).unwrap();
+        assert!(!tail.stream_present);
+        assert!(tail.events.is_empty());
+    }
+
+    #[test]
+    fn tail_keeps_the_newest_events_and_its_cursors_continue_with_read_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        for index in 0..10 {
+            journal
+                .append(&tail_event(&format!("e{index}"), "x"))
+                .unwrap();
+        }
+        let whole = journal.read_tail(1 << 20, 4).unwrap();
+        assert_eq!(tail_ids(&whole), vec!["e6", "e7", "e8", "e9"]);
+        assert_eq!(whole.dropped_events, 6);
+        assert!(!whole.starts_mid_stream);
+        assert!(!whole.is_complete());
+
+        let next = journal
+            .read_after(Some(&whole.events[1].cursor), 10)
+            .unwrap();
+        assert_eq!(
+            next.events
+                .iter()
+                .map(|row| row.event.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["e8", "e9"]
+        );
+        let all = journal.read_tail(1 << 20, 100).unwrap();
+        assert_eq!(all.events.len(), 10);
+        assert!(all.is_complete());
+    }
+
+    #[test]
+    fn a_mid_stream_window_drops_only_the_partial_first_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        for index in 0..10 {
+            journal
+                .append(&tail_event(&format!("e{index}"), "x"))
+                .unwrap();
+        }
+        // Equal-length envelopes: ids and timestamps have fixed widths here.
+        let line = std::fs::metadata(dir.path().join("operator_events.jsonl"))
+            .unwrap()
+            .len()
+            / 10;
+        let tail = journal.read_tail(line * 3 + line / 2, 100).unwrap();
+        assert_eq!(tail_ids(&tail), vec!["e7", "e8", "e9"]);
+        assert!(tail.starts_mid_stream);
+        assert_eq!(tail.skipped_lines, 0);
+        // Exactly three envelopes: the window begins on a boundary.
+        let aligned = journal.read_tail(line * 3, 100).unwrap();
+        assert_eq!(tail_ids(&aligned), vec!["e7", "e8", "e9"]);
+    }
+
+    #[test]
+    fn a_window_inside_one_large_envelope_has_no_events_but_is_partial() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        journal.append(&tail_event("small", "x")).unwrap();
+        journal
+            .append(&tail_event("large", &"y".repeat(64 * 1024)))
+            .unwrap();
+        let tail = journal.read_tail(1_000, 10).unwrap();
+        assert!(tail.stream_present);
+        assert!(tail.events.is_empty());
+        assert!(tail.starts_mid_stream);
+        assert!(!tail.is_complete());
+    }
+
+    #[test]
+    fn corrupt_and_torn_rows_in_the_window_are_counted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("operator_events.jsonl");
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        journal.append(&tail_event("a", "x")).unwrap();
+        {
+            let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+            file.write_all(b"not json\n").unwrap();
+        }
+        journal.append(&tail_event("b", "x")).unwrap();
+        {
+            let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+            file.write_all(b"{\"torn\":").unwrap();
+        }
+        let tail = journal.read_tail(1 << 20, 10).unwrap();
+        assert_eq!(tail_ids(&tail), vec!["a", "b"]);
+        assert_eq!(tail.skipped_lines, 2);
+        assert!(!tail.is_complete());
+    }
+
+    #[test]
+    fn tail_retries_when_lineage_changes_and_fails_when_it_never_settles() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("operator_events.jsonl");
+        let journal = OperatorJournal::new(dir.path().to_path_buf()).unwrap();
+        journal.append(&tail_event("old", "x")).unwrap();
+        let replaced = path.clone();
+        let mut swapped = false;
+        let hook = SnapshotHookGuard::install(move |_| {
+            if !swapped {
+                std::fs::write(&replaced, envelope_bytes(&tail_event("new", "x"))).unwrap();
+                swapped = true;
+            }
+        });
+        let tail = journal.read_tail(1 << 20, 10).unwrap();
+        assert_eq!(tail_ids(&tail), vec!["new"]);
+        drop(hook);
+
+        let replaced = path.clone();
+        let mut generation = 0;
+        let _hook = SnapshotHookGuard::install(move |_| {
+            generation += 1;
+            let event = tail_event(&format!("gen{generation}"), "x");
+            std::fs::write(&replaced, envelope_bytes(&event)).unwrap();
+        });
+        assert!(matches!(
+            journal.read_tail(1 << 20, 10),
+            Err(CursorError::UnstableLineage { .. })
+        ));
+    }
 }
 
-/// The `work_id` scope carried on every operator envelope.
-///
-/// Serialization is the contract here: events written before Work existed must
-/// keep reading, and an unscoped event must not start emitting a null field.
 #[cfg(test)]
 mod work_scope_tests {
     use super::*;
