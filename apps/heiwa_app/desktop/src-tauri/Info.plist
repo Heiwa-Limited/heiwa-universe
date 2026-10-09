@@ -2,5 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>NSCalendarsFullAccessUsageDescription</key><string>Heiwa reads calendars you select to show your existing events in your local workspace.</string>
+  <key>NSRemindersFullAccessUsageDescription</key><string>Heiwa reads the reminder lists you select to show their tasks locally and prepare proposed reminders. It does not change your reminders.</string>
   <key>NSAppleEventsUsageDescription</key><string>Heiwa reads Mail when you request it and creates Calendar events only after you approve them.</string>
 </dict></plist>
