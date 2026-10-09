@@ -92,11 +92,17 @@ fn ensure_machine_auth_in(root: &Path) -> std::io::Result<()> {
             "local secrets directory must be a real directory",
         ));
     }
+    // The installer lays out `secrets/` with the default umask before any
+    // credential exists. Tighten a real directory rather than refuse it; one
+    // owned by someone else still fails here because only its owner may chmod.
     #[cfg(unix)]
     if metadata.permissions().mode() & 0o077 != 0 {
-        return Err(std::io::Error::other(
-            "local secrets directory must be owner-private",
-        ));
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+        if fs::symlink_metadata(&directory)?.permissions().mode() & 0o077 != 0 {
+            return Err(std::io::Error::other(
+                "local secrets directory must be owner-private",
+            ));
+        }
     }
     let target = directory.join("machine_auth_token");
     match fs::symlink_metadata(&target) {
@@ -232,6 +238,26 @@ mod tests {
         fs::write(&target, "malformed token").unwrap();
         assert!(ensure_machine_auth_in(root.path()).is_err());
         assert_eq!(fs::read_to_string(target).unwrap(), "malformed token");
+    }
+
+    /// The installer lays out `secrets/` before any credential exists; a
+    /// default-umask directory there must not block the first launch.
+    #[cfg(unix)]
+    #[test]
+    fn desktop_auth_bootstrap_tightens_a_loose_secrets_directory() {
+        let root = tempdir().unwrap();
+        let secrets = root.path().join("secrets");
+        fs::create_dir_all(&secrets).unwrap();
+        fs::set_permissions(&secrets, fs::Permissions::from_mode(0o755)).unwrap();
+        ensure_machine_auth_in(root.path()).unwrap();
+        assert_eq!(
+            fs::metadata(&secrets).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            resolve_runtime_secret(None, None, Some(root.path()), "machine_auth_token").len(),
+            64
+        );
     }
 
     #[cfg(unix)]

@@ -614,6 +614,16 @@ fn ensure_runtime_layout(heiwa_dir: &Path) -> Result<()> {
     ] {
         fs::create_dir_all(heiwa_dir.join(dirname))?;
     }
+    // Local credentials live here; create it owner-private so the first
+    // launch never meets a world-readable credential directory.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let secrets = heiwa_dir.join("secrets");
+        if !fs::symlink_metadata(&secrets)?.file_type().is_symlink() {
+            fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700))?;
+        }
+    }
     Ok(())
 }
 
@@ -1251,6 +1261,18 @@ mod tests {
             report.missing()
         );
         assert!(report.missing().is_empty());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_layout_creates_an_owner_private_secrets_directory() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempdir()?;
+        let root = tmp.path().join(".heiwa");
+        ensure_runtime_layout(&root)?;
+        let mode = fs::metadata(root.join("secrets"))?.permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
         Ok(())
     }
 
