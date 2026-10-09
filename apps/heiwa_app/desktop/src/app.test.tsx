@@ -752,6 +752,21 @@ describe("operator seam", () => {
     expect((await screen.findByRole("status")).textContent).toContain("Read 2 headers; 1 added");
   });
 
+  it("reports why an explicit Mail read returned nothing instead of a zero count", async () => {
+    // Found on a fresh public install: a timed-out read printed
+    // "Read 0 headers; 0 added" as if Mail were simply empty.
+    const readAppleMail = vi.fn()
+      .mockResolvedValueOnce({ status: "no_consent", fetched: 0, appended: 0, deduplicated: 0 })
+      .mockResolvedValue({ status: "error", error_class: "timeout", error: "timed out", fetched: 0, appended: 0, deduplicated: 0 });
+    const { state } = harness({ readAppleMail, get: async () => ({ data: {} }) });
+    state.navigate("mail");
+    render(() => <App state={state} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Read Apple Mail" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("timed out");
+    expect(screen.queryByText(/Read 0 headers/)).toBeNull();
+  });
+
   it("keeps existing mail visible and allows retry after a native read failure", async () => {
     // Tauri serializes a Rust `Result::Err(String)` as a rejected string.
     const readAppleMail = vi.fn().mockRejectedValue("Automation access is required.");
