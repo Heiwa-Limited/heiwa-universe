@@ -155,3 +155,51 @@ Real build, not installed:
   across dev updates, and `install_runtime_binary` skips identical files.
 - The first dev install builds from a new path, so Calendar access is
   requested again once.
+
+## Provider execution observations (2026-10-09)
+
+Branch `codex/provider-execution-observations` from dev `2c695f61`. Classification:
+Evidence, with truthful Intake presentation. Routing is unchanged.
+
+- Provider adapters declare the channel they execute through
+  (`ExecutionChannel`, `Credential::kind_label` vocabulary): API adapters name
+  their registry account, CLI adapters their binary, Ollama `local_runtime`.
+  Undeclared adapters and legacy rows stay `unknown`.
+- `ModelCallExecutor` records that channel on `route_completed` and
+  `route_failed`, plus `provider_invoked` and `failure_origin`
+  (`provider`, `resolver`, `accounting`). Resolver misses and unpriceable
+  responses no longer read as provider failures.
+- `OperatorJournal::read_tail` reads the newest events in a bounded byte
+  window with `read_after`-compatible cursors, lineage revalidation, and the
+  existing corrupt-scan budgets.
+- `heiwa_session::provider_executions` folds route outcomes per provider and
+  channel into dated success/failure facts. It reads an allowlist (never the
+  provider message), honors event-id dedup and schema checks but not
+  turn state, and reports evidence as complete, partial, empty or unavailable.
+  It is not the Provider Truth Contract's `provider_observations` record kind.
+- `heiwa doctor` reads its own profile's bounded journal tail (no runtime
+  borrowing) and shows each CLI's last observed execution with its age.
+  Runtime provider rows add `execution_evidence` and `last_execution_*`
+  fields beside the unchanged auth fields; the desktop counts providers with
+  recorded runs separately from signed-in providers.
+
+- Review repairs: events in an unsupported schema and rejected facts
+  (impossible timestamps, unsafe identities) make evidence partial in both
+  the runtime projection and the doctor tail, with counts; only a missing
+  evidence root reads as empty, while permission errors, symlink loops and
+  non-directories are unavailable, and the read-only path never creates the
+  root; channel identities use context-specific rules so URL userinfo is
+  never projected.
+- Desktop: runtime rows carry the matched `execution_channel`; the Resources
+  panel shows each API account's and each detected CLI tool's dated last
+  success/failure with age and channel, matched by exact account id or
+  binary, with distinct unreachable, older-runtime, unavailable, empty and
+  partial states, from the snapshot the window already reads with its own
+  profile credentials. The account status label reads "configured" rather
+  than "ready" in doctor and the desktop; status values, `last_validated_at`,
+  routing and auth are unchanged. Aggregate counts use presence wording.
+
+Not done here: worker (`heiwa work run`)
+exits remain excluded because their provider label is user supplied; CLI
+observations identify the binary, not the signed-in account; entitlement is
+not inferred without structured provider error provenance.

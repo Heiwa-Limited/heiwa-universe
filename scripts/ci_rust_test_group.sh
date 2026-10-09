@@ -90,6 +90,7 @@ runtime_b_targets=(
   operator_service
   provider_adapters
   provider_auth
+  provider_executions
   registry_test
   restart_recovery
   run_receipts

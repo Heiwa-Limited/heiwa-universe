@@ -1109,6 +1109,35 @@ impl OperatorSessionService {
         })
     }
 
+    /// Provider execution observations over the whole journal, caught up
+    /// incrementally like every other read model of this service.
+    pub fn provider_executions(&self) -> Result<crate::provider_executions::ProviderExecutionView> {
+        use crate::provider_executions::{EvidenceState, ExecutionEvidence};
+        let materialized = self.materialized()?;
+        let skipped_lines = materialized.skipped_lines();
+        let state = if skipped_lines > 0 {
+            EvidenceState::Partial
+        } else if materialized.provider_executions.events_inspected() == 0
+            && materialized.provider_executions.unsupported_schema_events() == 0
+        {
+            EvidenceState::Empty
+        } else {
+            EvidenceState::Complete
+        };
+        Ok(materialized.provider_executions.view(ExecutionEvidence {
+            state,
+            source: "runtime_projection",
+            window_from: None,
+            events_inspected: 0,
+            skipped_lines,
+            starts_mid_stream: false,
+            dropped_events: 0,
+            unsupported_schema_events: 0,
+            rejected_facts: 0,
+            error: None,
+        }))
+    }
+
     /// Close out every nonterminal turn with a `turn_interrupted` event, as
     /// if the runtime had just restarted. Pending cancellation closes with
     /// `OPERATOR_CANCELLED`; every other open turn closes with
@@ -1904,6 +1933,9 @@ struct MaterializedJournal {
     tail_skipped_lines: usize,
     /// Diagnostic proving catch-up work is incremental in tests.
     applied_event_rows: usize,
+    /// Provider execution observations. Fed every row that passed event-id
+    /// dedup and schema checks, independent of thread/turn admission.
+    provider_executions: crate::provider_executions::ProviderExecutionFold,
 }
 
 impl MaterializedJournal {
@@ -1981,6 +2013,17 @@ fn sync_materialized_observing(
             projection.applied_event_rows = projection.applied_event_rows.saturating_add(1);
             let order = projection.order;
             let admission = apply_event(projection, row, order);
+            match admission {
+                EventAdmission::Admitted | EventAdmission::Rejected => {
+                    projection.provider_executions.observe(&row.event)
+                }
+                // A future schema may carry a route outcome this build cannot
+                // read: evidence is partial, not empty or complete.
+                EventAdmission::UnsupportedSchema => {
+                    projection.provider_executions.note_unsupported_schema()
+                }
+                EventAdmission::Duplicate => {}
+            }
             observe(row, admission);
         }
         projection.cursor = page.next_cursor;

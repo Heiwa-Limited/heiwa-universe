@@ -266,6 +266,36 @@ mod tests {
     }
 
     #[test]
+    fn the_resolved_adapter_reports_the_channel_that_actually_runs() {
+        // AccountHealth checks no binary for API keys, so this is hermetic.
+        let registry = AccountRegistry::from_accounts(vec![with_models(
+            api_key_account("google", AccountStatus::Connected),
+            &["gemini-3-flash"],
+        )]);
+        let api = resolve_adapter_with(&registry, "gemini", "gemini-3-flash", None).unwrap();
+        assert_eq!(
+            api.execution_channel(),
+            crate::adapter::ExecutionChannel::api_key("google-api-1")
+        );
+
+        let empty = AccountRegistry::default();
+        for (provider, binary) in [
+            ("gemini", "gemini"),
+            ("claude", "claude"),
+            ("codex", "codex"),
+        ] {
+            let cli = resolve_adapter_with(&empty, provider, "m", None).unwrap();
+            assert_eq!(
+                cli.execution_channel(),
+                crate::adapter::ExecutionChannel::cli(binary)
+            );
+            assert_eq!(cli.execution_channel().kind, "oauth_cli");
+        }
+        let ollama = resolve_adapter_with(&empty, "ollama", "qwen", None).unwrap();
+        assert_eq!(ollama.execution_channel().kind, "local_runtime");
+    }
+
+    #[test]
     fn an_empty_registry_yields_no_direct_api_account() {
         let registry = AccountRegistry::default();
         for provider in ["claude", "codex", "gemini"] {

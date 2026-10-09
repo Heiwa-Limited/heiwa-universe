@@ -18,6 +18,7 @@ use uuid::Uuid;
 pub mod migration;
 pub mod operator;
 pub mod operator_index;
+pub mod provider_executions;
 
 pub use operator_index::{
     operator_event_key, rebuild_operator_indexes, rebuild_operator_indexes_at, EmbeddingSink,

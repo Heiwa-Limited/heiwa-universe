@@ -96,6 +96,10 @@ impl ProviderAdapter for GeminiCliAdapter {
     fn supported_models(&self) -> Vec<String> {
         vec!["gemini-3.1-pro".to_string(), "gemini-3-flash".to_string()]
     }
+
+    fn execution_channel(&self) -> crate::adapter::ExecutionChannel {
+        crate::adapter::ExecutionChannel::cli("gemini")
+    }
 }
 
 fn extract_usage(result: &serde_json::Value) -> TokenUsage {

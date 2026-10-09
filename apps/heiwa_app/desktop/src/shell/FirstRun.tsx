@@ -1,7 +1,8 @@
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import type { DiscoveredResource, OnboardingState } from "../state/types";
 import "./first-run.css";
-import { ProviderConnections, type ProviderConnectionActions } from "./ProviderConnections";
+import { executionFacts, executionLine } from "../runtime";
+import { ProviderConnections, type ProviderConnectionActions, type ProviderExecutions } from "./ProviderConnections";
 
 /** Desktop setup acknowledges a local workspace; resource detection grants no access. */
 export function FirstRun(props: ProviderConnectionActions & {
@@ -14,6 +15,7 @@ export function FirstRun(props: ProviderConnectionActions & {
   onOpenSurface?: (surface: NonNullable<DiscoveredResource["surface"]>) => void | Promise<void>;
   onClose?: () => void;
   deviceDetails?: JSX.Element;
+  executions?: ProviderExecutions;
 }) {
   const [name, setName] = createSignal("");
   const [busy, setBusy] = createSignal(false);
@@ -70,6 +72,12 @@ export function FirstRun(props: ProviderConnectionActions & {
         {resource.tools_detected.length ? ` · Tools: ${resource.tools_detected.join(", ")}` : ""}
         {resource.category === "inference" ? ` · ${resource.registered_accounts} registered accounts` : ""}
       </p>
+      <Show when={resource.category === "inference" && props.executions}>
+        <For each={resource.tools_detected}>{(tool) => {
+          const line = () => executionLine(executionFacts(props.executions!.health, { binary: tool }, props.executions!.now));
+          return <Show when={line()}><p class="resource-runs">{tool}: {line()}</p></Show>;
+        }}</For>
+      </Show>
       <Show when={resource.surface && props.onOpenSurface}>
         <button class="first-run-button secondary" disabled={busy() || !props.state.workspace?.can_enter}
           onClick={() => void run(() => props.onOpenSurface!(resource.surface!))}>
@@ -113,6 +121,7 @@ export function FirstRun(props: ProviderConnectionActions & {
         </Show>
         <Show when={props.state.workspace}>
           <ProviderConnections connections={props.state.workspace?.connections ?? []}
+            executions={props.executions}
             onConnectApiProvider={props.onConnectApiProvider}
             onVerifyApiProvider={props.onVerifyApiProvider}
             onDisconnectApiProvider={props.onDisconnectApiProvider} />

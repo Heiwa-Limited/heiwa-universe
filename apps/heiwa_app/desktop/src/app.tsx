@@ -174,6 +174,7 @@ export function App(props: AppProps) {
       <Show when={props.onboarding && (setupNeeded() || resourcesOpen())}>
         <FirstRun
           deviceDetails={<MachinePerspective />}
+          executions={{ health: props.state.runtime.health(), now: new Date() }}
           state={props.onboarding!}
           onEstablishIdentity={(name) => props.onEstablishIdentity?.(name)}
           onRecheck={() => props.onRecheckOnboarding?.()}

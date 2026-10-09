@@ -406,7 +406,7 @@ describe("shell", () => {
     const { state } = harness();
     render(() => <App state={state} />);
     await state.runtime.loadHealth();
-    expect(screen.getByText(/0\.1\.0-test · 1 providers/)).toBeTruthy();
+    expect(screen.getByText(/0\.1\.0-test · 1 providers present · 0 with recorded runs/)).toBeTruthy();
   });
 
   it("keeps the visible surface current when the window returns and while it stays open", async () => {

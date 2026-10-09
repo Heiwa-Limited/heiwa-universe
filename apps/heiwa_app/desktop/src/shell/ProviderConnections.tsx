@@ -1,5 +1,12 @@
 import { createSignal, For, Show } from "solid-js";
+import { executionFacts, executionLine, type RuntimeHealth } from "../runtime";
 import type { ProviderConnection } from "../state/types";
+
+/**
+ * Execution history comes from the runtime snapshot this window already reads
+ * with its own profile's credentials; nothing here reads the journal.
+ */
+export type ProviderExecutions = { health: RuntimeHealth | null; now: Date };
 
 export type ProviderConnectionActions = {
   onConnectApiProvider?: (provider: string, apiKey: string) => Promise<void>;
@@ -27,12 +34,15 @@ const label = (provider: string) => providers.find((entry) => entry.id === provi
  * on the Rust side, AccountStatus::label().
  */
 const statusLabel = (status: ProviderConnection["status"]) => ({
-  connected: "Ready", disconnected: "Not linked",
+  connected: "Configured", disconnected: "Not linked",
   needs_verification: "Needs verification", verification_failed: "Verification failed",
 })[status];
 
 /** Secrets live in this form only until submission, never in saved UI state. */
-export function ProviderConnections(props: ProviderConnectionActions & { connections: ProviderConnection[] }) {
+export function ProviderConnections(props: ProviderConnectionActions & {
+  connections: ProviderConnection[];
+  executions?: ProviderExecutions;
+}) {
   const [provider, setProvider] = createSignal("openai");
   const [key, setKey] = createSignal("");
   const [busy, setBusy] = createSignal(false);
@@ -58,7 +68,11 @@ export function ProviderConnections(props: ProviderConnectionActions & { connect
     <Show when={props.connections.length} fallback={<p>No accounts registered in this workspace yet.</p>}>
       <ul class="connection-list">
         <For each={props.connections}>{(connection) => <li class="connection-row">
-          <div><strong>{label(connection.provider)}</strong><span>{connection.channel} · {statusLabel(connection.status)} · {connection.model_count} models</span></div>
+          <div><strong>{label(connection.provider)}</strong><span>{connection.channel} · {statusLabel(connection.status)} · {connection.model_count} models</span>
+            <Show when={props.executions && executionLine(executionFacts(props.executions.health, { accountId: connection.account_id }, props.executions.now))}>
+              {(line) => <span class="connection-runs">{line()}</span>}
+            </Show>
+          </div>
           <Show when={connection.can_manage_key}>
             <div class="connection-actions">
               <Show when={props.onVerifyApiProvider}><button type="button" class="first-run-button secondary" disabled={busy()} aria-label={`Verify ${label(connection.provider)} connection`} onClick={() => void run(() => props.onVerifyApiProvider!(connection.account_id), "Connection checked. Review its status above.")}>Verify</button></Show>
