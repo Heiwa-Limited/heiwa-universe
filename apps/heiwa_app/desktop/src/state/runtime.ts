@@ -19,6 +19,9 @@ import type {
   InboxItem,
   MailMessage,
   MailSyncStatus,
+  ReminderList,
+  ReminderRead,
+  ReminderStatus,
 } from "./types";
 
 /** Runtime-derived state consumed by more than one surface. */
@@ -62,6 +65,12 @@ export type RuntimeState = {
   connectAppleCalendar: () => Promise<void>;
   readAppleCalendars: (ids: string[]) => Promise<{ fetched: number; truncated: boolean }>;
   disconnectAppleCalendar: () => Promise<void>;
+  /** Apple Reminders, read only. Every call goes through the app runtime so macOS attributes access to Heiwa. */
+  reminderStatus: () => Promise<ReminderStatus>;
+  connectReminders: () => Promise<void>;
+  reminderLists: () => Promise<{ lists: ReminderList[]; complete: boolean }>;
+  selectReminderLists: (ids: string[]) => Promise<void>;
+  readReminders: () => Promise<ReminderRead>;
   createCalendarHold: (input: CalendarHoldInput) => Promise<void>;
   loadApprovals: () => Promise<void>;
   decideApproval: (id: string, approve: boolean) => Promise<void>;
@@ -221,6 +230,26 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
   async function disconnectAppleCalendar(): Promise<void> {
     await post("/api/v1/connectors/apple_calendar/disconnect", {});
     await loadCalendarResources();
+  }
+
+  async function reminderStatus(): Promise<ReminderStatus> {
+    return (await get<{ data: ReminderStatus }>("/api/v1/reminders/status")).data;
+  }
+
+  async function connectReminders(): Promise<void> {
+    await post("/api/v1/connectors/apple_reminders/connect", {});
+  }
+
+  async function reminderLists(): Promise<{ lists: ReminderList[]; complete: boolean }> {
+    return (await get<{ data: { lists: ReminderList[]; complete: boolean } }>("/api/v1/reminders/lists")).data;
+  }
+
+  async function selectReminderLists(ids: string[]): Promise<void> {
+    await post("/api/v1/reminders/select", { list_ids: ids });
+  }
+
+  async function readReminders(): Promise<ReminderRead> {
+    return (await get<{ data: ReminderRead }>("/api/v1/reminders")).data;
   }
 
   async function createCalendarHold(input: CalendarHoldInput): Promise<void> {
@@ -384,6 +413,11 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     connectAppleCalendar,
     readAppleCalendars,
     disconnectAppleCalendar,
+    reminderStatus,
+    connectReminders,
+    reminderLists,
+    selectReminderLists,
+    readReminders,
     createCalendarHold,
     loadApprovals,
     decideApproval,

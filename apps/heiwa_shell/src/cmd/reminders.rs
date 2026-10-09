@@ -236,22 +236,8 @@ pub(crate) fn connect(args: &[String]) -> Result<()> {
         .collect();
     let data = match flags.as_slice() {
         [] => apple_resources::connection_payload(RESOURCE),
-        ["--authorize"] => {
-            let _lock = selection_lock()?;
-            let count = apple_resources::connect(
-                RESOURCE,
-                &["reminders.read", "reminders.propose"],
-                || inventory(true).map(|inventory| inventory.lists.len()),
-            )?;
-            json!({"connector":"apple_reminders","status":"connected","resource_count":count,
-                "auth":{"mode":"eventkit","owner":"macOS","secrets":"none"}})
-        }
-        ["--disconnect"] => {
-            let _lock = selection_lock()?;
-            apple_resources::remove_enrollment(RESOURCE)?;
-            json!({"connector":"apple_reminders","status":"disconnected","local_selection_preserved":true,
-                "revoke":"System Settings > Privacy & Security > Reminders"})
-        }
+        ["--authorize"] => authorize()?,
+        ["--disconnect"] => disconnect()?,
         _ => bail!(CliError::usage(
             "heiwa connect apple-reminders [--authorize|--disconnect] [--json]"
         )),
@@ -270,6 +256,46 @@ pub(crate) fn connect(args: &[String]) -> Result<()> {
     })
 }
 
+/// Enroll Reminders for this installation and device, asking macOS for
+/// Reminders access through the helper. Shared by the CLI and the app API;
+/// from the app, macOS attributes the request to Heiwa itself.
+pub(crate) fn authorize() -> Result<Value> {
+    let _lock = selection_lock()?;
+    let count =
+        apple_resources::connect(RESOURCE, &["reminders.read", "reminders.propose"], || {
+            inventory(true).map(|inventory| inventory.lists.len())
+        })?;
+    Ok(
+        json!({"connector":"apple_reminders","status":"connected","resource_count":count,
+        "auth":{"mode":"eventkit","owner":"macOS","secrets":"none"}}),
+    )
+}
+
+pub(crate) fn disconnect() -> Result<Value> {
+    let _lock = selection_lock()?;
+    apple_resources::remove_enrollment(RESOURCE)?;
+    Ok(
+        json!({"connector":"apple_reminders","status":"disconnected","local_selection_preserved":true,
+        "revoke":"System Settings > Privacy & Security > Reminders"}),
+    )
+}
+
+/// Enrollment and saved selection only; never calls the helper.
+pub(crate) fn status() -> Value {
+    let mut payload = apple_resources::connection_payload(RESOURCE);
+    payload["selected_list_ids"] = json!(selected_ids().unwrap_or_default());
+    payload
+}
+
+pub(crate) fn lists() -> Result<Value> {
+    apple_resources::require_connection(RESOURCE)?;
+    let inventory = inventory(false)?;
+    apple_resources::require_connection(RESOURCE)?;
+    Ok(
+        json!({"lists":inventory.lists,"truncated":inventory.truncated,"complete":!inventory.truncated}),
+    )
+}
+
 pub fn run(args: &[String]) -> Result<()> {
     let json_output = output::wants_json(args);
     let args: Vec<String> = args
@@ -278,12 +304,7 @@ pub fn run(args: &[String]) -> Result<()> {
         .cloned()
         .collect();
     let data = match args.first().map(String::as_str) {
-        Some("lists") if args.len() == 1 => {
-            apple_resources::require_connection(RESOURCE)?;
-            let inventory = inventory(false)?;
-            apple_resources::require_connection(RESOURCE)?;
-            json!({"lists":inventory.lists,"truncated":inventory.truncated,"complete":!inventory.truncated})
-        }
+        Some("lists") if args.len() == 1 => lists()?,
         Some("select") => select(&args[1..])?,
         Some("read") if args.len() == 1 => read()?,
         Some("propose") => propose(&args[1..])?,
@@ -344,7 +365,7 @@ fn print_result(data: &Value) {
     }
 }
 
-fn select(ids: &[String]) -> Result<Value> {
+pub(crate) fn select(ids: &[String]) -> Result<Value> {
     apple_resources::require_connection(RESOURCE)?;
     validate_ids(ids)?;
     let _lock = selection_lock()?;
@@ -355,7 +376,7 @@ fn select(ids: &[String]) -> Result<Value> {
     Ok(json!({"selected_list_ids":ids,"inventory_complete":!inventory.truncated}))
 }
 
-fn read() -> Result<Value> {
+pub(crate) fn read() -> Result<Value> {
     apple_resources::require_connection(RESOURCE)?;
     let _lock = selection_lock()?;
     let ids = selected_ids()?;

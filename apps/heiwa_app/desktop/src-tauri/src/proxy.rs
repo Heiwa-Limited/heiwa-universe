@@ -220,6 +220,8 @@ const ALLOWED_POST_EXACT: &[&str] = &[
     "/api/v1/calendar/holds",
     "/api/v1/connectors/apple_calendar/connect",
     "/api/v1/connectors/apple_calendar/disconnect",
+    "/api/v1/connectors/apple_reminders/connect",
+    "/api/v1/reminders/select",
     "/api/v1/finance/sync",
     "/api/v1/operator/threads",
     "/api/v1/operator/projects",

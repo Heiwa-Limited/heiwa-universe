@@ -192,6 +192,7 @@ const SURFACE_MARKERS: Record<string, string | RegExp> = {
   approvals: "Pending decisions",
   // Mail now renders the local snapshot rather than an L3 placeholder.
   mail: /metadata only, read\s+from this machine/,
+  reminders: "Read only · lists you choose",
   // Finance renders its read-only read model rather than an L3 placeholder.
   finance: /cannot trade or move money/,
   social: /Ingress arrives with the L3 connector plane/,
@@ -212,6 +213,7 @@ describe("shell", () => {
       "calendar",
       "approvals",
       "mail",
+      "reminders",
       "finance",
       "social",
       "workers",
@@ -362,7 +364,7 @@ describe("shell", () => {
     const { state } = harness();
     render(() => <App state={state} />);
     const labels = [...document.querySelectorAll<HTMLButtonElement>(".sidebar-navlist button")].map((button) => button.textContent);
-    expect(labels).toEqual(["Home", "All sessions", "Work", "Calendar", "Mail"]);
+    expect(labels).toEqual(["Home", "All sessions", "Work", "Calendar", "Mail", "Reminders"]);
   });
 
   it.each(SURFACES.map((surface) => surface.id))("mounts the %s surface", (id) => {
@@ -750,6 +752,39 @@ describe("operator seam", () => {
     finishRead({ fetched: 2, appended: 1, deduplicated: 1 });
     expect(await screen.findByText("Fresh mail")).toBeTruthy();
     expect((await screen.findByRole("status")).textContent).toContain("Read 2 headers; 1 added");
+  });
+
+  it("connects Reminders from the app, then saves chosen lists and reads them", async () => {
+    let connected = false;
+    let saved: string[] = [];
+    const get = async (path: string) => {
+      if (path === "/api/v1/reminders/status") {
+        return { data: { connector: "apple_reminders", status: connected ? "connected" : "disconnected", selected_list_ids: saved } };
+      }
+      if (path === "/api/v1/reminders/lists") {
+        return { data: { complete: true, lists: [{ id: "l1", name: "Errands", source: "iCloud", writable: true }] } };
+      }
+      if (path === "/api/v1/reminders") {
+        return { data: { complete: true, truncated: false, selected_list_ids: saved,
+          reminders: [{ id: "r1", list_id: "l1", title: "Buy milk", due: { date: "2026-10-10" }, completed: false }] } };
+      }
+      return { data: {} };
+    };
+    const { state, runtimePost } = harness({ get });
+    runtimePost.mockImplementation(async (path: string, body: { list_ids?: string[] }) => {
+      if (path === "/api/v1/connectors/apple_reminders/connect") connected = true;
+      if (path === "/api/v1/reminders/select") saved = body.list_ids ?? [];
+      return { ok: true, data: {} };
+    });
+    state.navigate("reminders");
+    render(() => <App state={state} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Apple Reminders" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: /Errands/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save and read lists" }));
+
+    expect(await screen.findByText("Buy milk")).toBeTruthy();
+    expect(runtimePost).toHaveBeenCalledWith("/api/v1/reminders/select", { list_ids: ["l1"] });
   });
 
   it("reports why an explicit Mail read returned nothing instead of a zero count", async () => {
