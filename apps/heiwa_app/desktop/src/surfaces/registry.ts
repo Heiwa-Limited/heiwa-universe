@@ -7,6 +7,7 @@ import { financeSurface } from "./finance";
 import { homeSurface } from "./home";
 import { sessionsSurface, projectsSurface } from "./sessions";
 import { mailSurface } from "./mail";
+import { remindersSurface } from "./reminders";
 import { socialSurface } from "./social";
 import { windowsSurface } from "./windows";
 import { workersSurface } from "./workers";
@@ -28,6 +29,7 @@ export const SURFACES: SurfaceModule[] = [
   calendarSurface,
   approvalsSurface,
   mailSurface,
+  remindersSurface,
   financeSurface,
   socialSurface,
   workersSurface,

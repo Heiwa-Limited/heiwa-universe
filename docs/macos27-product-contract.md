@@ -175,8 +175,12 @@ The effect marker hashes a JSON tuple of the local calendar ID, event ID and
 exact imported occurrence string. This is device/store-local identity, with
 dedup limited to the selected lists; moving or syncing an event can change its
 identity. Truncated/unavailable scans remain undetermined and duplicate markers
-remain ambiguous. No notes or arbitrary URLs are projected. R1 does not supply
-an API/desktop tool, worker admission, approval, or write lane. Source/hermetic
+remain ambiguous. No notes or arbitrary URLs are projected. The desktop
+Reminders surface reaches the same service through the app runtime
+(`/api/v1/connectors/apple_reminders/connect`, `/api/v1/reminders/status`,
+`lists`, `select`, and read), so macOS attributes the Reminders permission to
+Heiwa rather than a terminal; it connects, selects lists, and reads, and
+proposals stay CLI-only. There is no worker admission, approval, or write lane. Source/hermetic
 checks are distinct from device acceptance. A separate TCC identity isolates
 consent, not the user's EventKit database; real-data access or test-list creation
 needs separate authorization. C1-b write acceptance remains pending on authority,
