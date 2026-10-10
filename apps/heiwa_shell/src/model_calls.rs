@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -178,14 +179,122 @@ struct FailedRouteAttempt<'a> {
     remaining_budget_usd: Option<f64>,
 }
 
+type AdmittedResolver =
+    dyn Fn(&ModelCallCandidate) -> Result<Arc<dyn ProviderAdapter>, String> + Send + Sync;
+
+type AdmittedLaneMap = HashMap<u64, Arc<heiwa_provider::admission::RegistryAdmittedLane>>;
+type RegistrySelection = (Vec<ModelCallCandidate>, AdmittedLaneMap);
+
+fn registry_selection_with_ids(
+    candidates: Vec<ModelCallCandidate>,
+    registry: &heiwa_provider::AccountRegistry,
+    installed: impl Fn(&str) -> bool,
+    identity: impl Fn(&heiwa_provider::DetectedModel) -> u64,
+) -> Result<RegistrySelection, ModelCallError> {
+    let admitted = heiwa_provider::admission::admitted_candidates_with(registry, installed);
+    let mut admitted_counts = HashMap::new();
+    for entry in &admitted {
+        *admitted_counts
+            .entry(identity(&entry.model))
+            .or_insert(0_usize) += 1;
+    }
+    let mut counts = HashMap::new();
+    for candidate in &candidates {
+        *counts.entry(candidate.tier.id).or_insert(0_usize) += 1;
+    }
+    let mut witnesses = HashMap::new();
+    let mut selected = Vec::new();
+    for candidate in candidates {
+        if counts.get(&candidate.tier.id) != Some(&1)
+            || admitted_counts.get(&candidate.tier.id) != Some(&1)
+        {
+            continue;
+        }
+        let mut matches = admitted.iter().filter(|entry| {
+            candidate.tier.id == identity(&entry.model)
+                && candidate.tier.provider == entry.lane.provider()
+                && candidate.tier.model_id == entry.lane.model_id()
+                && candidate.tier.provider_model_id == entry.lane.provider_model_id()
+                && candidate.tier.rate_group == entry.lane.rate_group()
+                && candidate.tier.capability_class == entry.model.capability_class
+                && candidate.tier.max_context_tokens == entry.model.context_window
+                && candidate.tier.cost_per_turn == entry.model.cost_per_1k_input * 4.0
+        });
+        if let Some(entry) = matches.next() {
+            // An ambiguous/colliding candidate cannot lend identity to a lane.
+            if matches.next().is_none() {
+                witnesses.insert(candidate.tier.id, entry.lane.clone());
+                selected.push(candidate);
+            }
+        }
+    }
+    if selected.is_empty() {
+        let guidance = heiwa_provider::health::FleetHealth::project(&registry.accounts).guidance();
+        return Err(ModelCallError::Planning(if guidance.is_empty() {
+            "No requested lane matches an exact admitted account/model; refresh provider routes"
+                .into()
+        } else {
+            guidance
+        }));
+    }
+    Ok((selected, witnesses))
+}
+
+fn registry_execution_selection(
+    candidates: Vec<ModelCallCandidate>,
+    registry: &heiwa_provider::AccountRegistry,
+    installed: impl Fn(&str) -> bool,
+) -> Result<(Vec<ModelCallCandidate>, Box<AdmittedResolver>), ModelCallError> {
+    let (selected, witnesses) = registry_selection_with_ids(
+        candidates,
+        registry,
+        installed,
+        heiwa_provider::routing::registry_model_candidate_id,
+    )?;
+    Ok((
+        selected,
+        Box::new(move |candidate| {
+            let lane = witnesses
+                .get(&candidate.tier.id)
+                .ok_or_else(|| "Selected provider lane was not admitted".to_string())?;
+            if candidate.tier.provider != lane.provider()
+                || candidate.tier.model_id != lane.model_id()
+                || candidate.tier.provider_model_id != lane.provider_model_id()
+                || candidate.tier.rate_group != lane.rate_group()
+            {
+                return Err(
+                    heiwa_provider::admission::ProviderAdmissionDenial::LaneMismatch.to_string(),
+                );
+            }
+            let current = heiwa_provider::AccountRegistry::load_strict()
+                .map_err(|_| "Provider configuration could not be read".to_string())?;
+            lane.validate_current(&current).map_err(|e| e.to_string())?;
+            heiwa_provider::routing::resolve_admitted_adapter(lane.clone())
+                .map_err(|e| e.to_string())
+        }),
+    ))
+}
+
 pub struct ModelCallExecutor {
-    resolver: Arc<AdapterResolver>,
+    resolver: Option<Arc<AdapterResolver>>,
     sessions: Arc<OperatorSessionService>,
 }
 
 impl ModelCallExecutor {
     pub fn new(resolver: Arc<AdapterResolver>, sessions: Arc<OperatorSessionService>) -> Self {
-        Self { resolver, sessions }
+        Self {
+            resolver: Some(resolver),
+            sessions,
+        }
+    }
+
+    /// Production admission is rebuilt per execution. Its selected witness is
+    /// retained only for this request, never in process-global mutable truth.
+    pub fn new_registry(sessions: Arc<OperatorSessionService>) -> Self {
+        Self {
+            resolver: None,
+            sessions,
+        }
     }
 
     pub async fn execute(
@@ -207,6 +316,21 @@ impl ModelCallExecutor {
             return Err(ModelCallError::Cancelled);
         }
 
+        let admitted_resolver = if self.resolver.is_none() {
+            let registry = heiwa_provider::AccountRegistry::load_strict().map_err(|_| {
+                ModelCallError::Planning(
+                    "Provider configuration could not be read; inspect heiwa doctor".into(),
+                )
+            })?;
+            let (candidates, resolver) =
+                registry_execution_selection(execution.candidates, &registry, |binary| {
+                    heiwa_provider::resolve_command(binary).is_some()
+                })?;
+            execution.candidates = candidates;
+            Some(resolver)
+        } else {
+            None
+        };
         let max_attempts = execution.max_attempts.min(3);
         let mut attempts = 0usize;
         let mut remaining_budget = execution.remaining_budget_usd;
@@ -250,42 +374,54 @@ impl ModelCallExecutor {
                 }),
             )?;
 
-            let Some(adapter) = (self.resolver)(&provider, &provider_model_id) else {
-                let failure = (
-                    ProviderFailureClass::Availability,
-                    format!("provider resolver missing for {provider}/{provider_model_id}"),
-                );
-                let attempt_cost = None;
-                let attempt_truth = CostTruth::CannotConfirm;
-                self.append_failure(
-                    &execution.request,
-                    FailedRouteAttempt {
-                        candidate: &candidate,
-                        channel: None,
-                        provider_invoked: false,
-                        origin: FailureOrigin::Resolver,
-                        attempt: attempts,
-                        failure: &failure,
-                        cost_usd: attempt_cost,
-                        cost_truth: &attempt_truth,
-                        remaining_budget_usd: remaining_budget,
-                    },
-                )?;
-                attempt_records.push(failed_attempt_record(
-                    &candidate,
-                    failure.0,
-                    false,
-                    attempt_cost,
-                    attempt_truth,
-                ));
-                let failed_identity = qualified_model_identity(&candidate);
-                execution
-                    .request
-                    .excluded_models
-                    .push(failed_identity.clone());
-                failed_models.push(failed_identity);
-                last_failure = Some(failure);
-                continue;
+            let resolved = if let Some(resolver) = &admitted_resolver {
+                resolver(&candidate)
+            } else {
+                self.resolver
+                    .as_ref()
+                    .expect("injected executor owns a resolver")(
+                    &provider, &provider_model_id
+                )
+                .ok_or_else(|| {
+                    format!("provider resolver missing for {provider}/{provider_model_id}")
+                })
+            };
+            let adapter = match resolved {
+                Ok(adapter) => adapter,
+                Err(message) => {
+                    let failure = (ProviderFailureClass::Availability, message);
+                    let attempt_cost = None;
+                    let attempt_truth = CostTruth::CannotConfirm;
+                    self.append_failure(
+                        &execution.request,
+                        FailedRouteAttempt {
+                            candidate: &candidate,
+                            channel: None,
+                            provider_invoked: false,
+                            origin: FailureOrigin::Resolver,
+                            attempt: attempts,
+                            failure: &failure,
+                            cost_usd: attempt_cost,
+                            cost_truth: &attempt_truth,
+                            remaining_budget_usd: remaining_budget,
+                        },
+                    )?;
+                    attempt_records.push(failed_attempt_record(
+                        &candidate,
+                        failure.0,
+                        false,
+                        attempt_cost,
+                        attempt_truth,
+                    ));
+                    let failed_identity = qualified_model_identity(&candidate);
+                    execution
+                        .request
+                        .excluded_models
+                        .push(failed_identity.clone());
+                    failed_models.push(failed_identity);
+                    last_failure = Some(failure);
+                    continue;
+                }
             };
 
             let channel = adapter.execution_channel();
@@ -1032,6 +1168,204 @@ async fn run_adapter(
                     Err(_) => cancel_open = false,
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod registry_admission_tests {
+    use super::*;
+    use heiwa_provider::{
+        AccountRegistry, AccountStatus, Credential, DetectedModel, InventoryTruth, PriceTruth,
+        ProviderAccount,
+    };
+
+    fn account(id: &str, credential: Credential, group: &str) -> ProviderAccount {
+        ProviderAccount {
+            account_id: id.into(),
+            provider: "openai".into(),
+            credential,
+            rate_group: group.into(),
+            status: AccountStatus::Connected,
+            models: vec![DetectedModel {
+                model_id: "same-model".into(),
+                provider_model_id: "same-model".into(),
+                provider: "openai".into(),
+                account_id: id.into(),
+                rate_group: group.into(),
+                capability_class: 4,
+                context_window: 32_000,
+                supports_streaming: true,
+                supports_tools: true,
+                supports_vision: false,
+                supports_audio: false,
+                cost_per_1k_input: 0.01,
+                cost_per_1k_output: 0.02,
+                price_truth: PriceTruth::Known,
+                inventory_truth: InventoryTruth::Verified,
+            }],
+        }
+    }
+
+    fn candidate(account: &ProviderAccount) -> ModelCallCandidate {
+        let model = &account.models[0];
+        ModelCallCandidate {
+            tier: heiwa_protocol::ModelTier {
+                id: heiwa_provider::routing::registry_model_candidate_id(model),
+                model_id: model.model_id.clone(),
+                provider_model_id: model.provider_model_id.clone(),
+                provider: "codex".into(),
+                rate_group: model.rate_group.clone(),
+                capability_class: 4,
+                effort_knob: "default".into(),
+                effort_level: 1,
+                cost_per_turn: 0.04,
+                max_context_tokens: 32_000,
+                strengths_json: "[\"chat\",\"tool_use\",\"advanced_coding\"]".into(),
+                vram_requirement_mb: 0,
+                quantization_type: "none".into(),
+                kv_cache_strategy: "standard".into(),
+                enabled: true,
+                last_success_rate: 1.0,
+                avg_latency_ms: 200,
+                latency_p_95_ms: 500,
+                updated_at: "fixture".into(),
+            },
+            locality: heiwa_core::drex::ExecutionLocality::Unverified,
+            connected: true,
+            adapter_capable: true,
+            quota_available: true,
+            marginal_cost_usd: Some(0.04),
+            cost_truth: CostTruth::ProxyEstimate,
+        }
+    }
+
+    #[test]
+    fn same_model_cli_and_api_candidates_keep_their_own_original_account_witness() {
+        let seat = account(
+            "openai-seat",
+            Credential::OauthCli {
+                binary: "codex".into(),
+            },
+            "openai_sub",
+        );
+        let key = account("openai-key", Credential::ApiKey, "openai_api");
+        let seat_candidate = candidate(&seat);
+        let key_candidate = candidate(&key);
+        let registry = AccountRegistry::from_accounts(vec![key, seat]);
+        let (selected, witnesses) = registry_selection_with_ids(
+            vec![seat_candidate.clone(), key_candidate.clone()],
+            &registry,
+            |_| true,
+            heiwa_provider::routing::registry_model_candidate_id,
+        )
+        .unwrap();
+        assert_eq!(selected.len(), 2);
+        assert_eq!(
+            witnesses[&seat_candidate.tier.id].account_id(),
+            "openai-seat"
+        );
+        assert_eq!(witnesses[&key_candidate.tier.id].account_id(), "openai-key");
+        assert_eq!(
+            witnesses[&seat_candidate.tier.id].rate_group(),
+            "openai_sub"
+        );
+        let lane = witnesses[&key_candidate.tier.id].clone();
+        // The factory receives exactly the stored lane, not a provider/model lookup.
+        let adapter = heiwa_provider::routing::resolve_admitted_adapter(lane.clone()).unwrap();
+        assert!(Arc::ptr_eq(&lane, &witnesses[&key_candidate.tier.id]));
+        assert_eq!(
+            adapter.execution_channel().account_id.as_deref(),
+            Some("openai-key")
+        );
+    }
+
+    #[test]
+    fn unavailable_seat_cannot_borrow_a_working_api_account_with_the_same_model() {
+        let mut seat = account(
+            "openai-seat",
+            Credential::OauthCli {
+                binary: "codex".into(),
+            },
+            "openai_sub",
+        );
+        let seat_candidate = candidate(&seat);
+        seat.status = AccountStatus::Disconnected;
+        let key = account("openai-key", Credential::ApiKey, "openai_api");
+        assert!(registry_selection_with_ids(
+            vec![seat_candidate],
+            &AccountRegistry::from_accounts(vec![key, seat]),
+            |_| true,
+            heiwa_provider::routing::registry_model_candidate_id
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn candidate_identity_and_rate_group_cannot_be_forged_to_borrow_a_lane() {
+        let key = account("openai-key", Credential::ApiKey, "openai_api");
+        let mut changed = candidate(&key);
+        changed.tier.rate_group = "openai_sub".into();
+        assert!(registry_selection_with_ids(
+            vec![changed],
+            &AccountRegistry::from_accounts(vec![key]),
+            |_| true,
+            heiwa_provider::routing::registry_model_candidate_id
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn duplicate_input_ids_and_hash_collisions_cannot_overwrite_a_witness() {
+        let key = account("openai-key", Credential::ApiKey, "openai_api");
+        let candidate = candidate(&key);
+        let registry = AccountRegistry::from_accounts(vec![key.clone()]);
+        assert!(registry_selection_with_ids(
+            vec![candidate.clone(), candidate.clone()],
+            &registry,
+            |_| true,
+            heiwa_provider::routing::registry_model_candidate_id
+        )
+        .is_err());
+        let neighbor = account("openai-other", Credential::ApiKey, "openai_api");
+        let mut colliding = candidate;
+        colliding.tier.id = 42;
+        assert!(registry_selection_with_ids(
+            vec![colliding],
+            &AccountRegistry::from_accounts(vec![key, neighbor]),
+            |_| true,
+            |_| 42
+        )
+        .is_err());
+    }
+    #[test]
+    fn stale_ranking_metadata_is_denied_before_execution_selection() {
+        let key = account("openai-key", Credential::ApiKey, "openai_api");
+        let registry = AccountRegistry::from_accounts(vec![key.clone()]);
+        for changed in [
+            {
+                let mut c = candidate(&key);
+                c.tier.capability_class = 5;
+                c
+            },
+            {
+                let mut c = candidate(&key);
+                c.tier.max_context_tokens *= 2;
+                c
+            },
+            {
+                let mut c = candidate(&key);
+                c.tier.cost_per_turn = 0.0;
+                c
+            },
+        ] {
+            assert!(registry_selection_with_ids(
+                vec![changed],
+                &registry,
+                |_| true,
+                heiwa_provider::routing::registry_model_candidate_id
+            )
+            .is_err());
         }
     }
 }

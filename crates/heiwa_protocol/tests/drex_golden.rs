@@ -8,7 +8,7 @@
 //! L3 CLI smoke -> `apps/heiwa_shell/tests/smoke.rs`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use heiwa_protocol::parse_turn_intent;
 use serde::Deserialize;
@@ -51,7 +51,11 @@ struct Expect {
 }
 
 fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drex_golden/l1")
+    // Cargo sets the current package directory when running tests; cached
+    // artifacts may have been compiled in a checkout that no longer exists.
+    std::env::current_dir()
+        .expect("current package directory")
+        .join("tests/fixtures/drex_golden/l1")
 }
 
 #[test]

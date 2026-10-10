@@ -7,44 +7,57 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
+fn repository_root() -> PathBuf {
+    // Shared Cargo artifacts may have been compiled in a disposable checkout.
+    // Cargo executes each integration test from its current package directory;
+    // inspect that source tree rather than a cached CARGO_MANIFEST_DIR string.
+    let current = env::current_dir().expect("test working directory");
+    current
+        .ancestors()
+        .find(|path| {
+            path.join("Cargo.toml").is_file() && path.join(".github/workflows/ci.yml").is_file()
+        })
+        .expect("current repository root")
+        .to_path_buf()
+}
+
+struct RestoreEnvironment(Vec<(&'static str, Option<std::ffi::OsString>)>);
+
+impl Drop for RestoreEnvironment {
+    fn drop(&mut self) {
+        for (name, value) in &self.0 {
+            match value {
+                Some(value) => env::set_var(name, value),
+                None => env::remove_var(name),
+            }
+        }
+    }
+}
+
 fn with_temp_home<T>(f: impl FnOnce(&PathBuf) -> T) -> T {
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
-
-    let tmp = std::env::temp_dir().join(format!("heiwa-install-test-{}", uuid::Uuid::new_v4()));
-    fs::create_dir_all(&tmp).expect("create temp home");
-
-    let original_home = env::var_os("HOME");
-    let original_heiwa_home = env::var_os("HEIWA_HOME");
-    let original_root = env::var_os("HEIWA_ROOT");
-    env::set_var("HOME", &tmp);
-    env::remove_var("HEIWA_HOME");
-    env::set_var(
-        "HEIWA_ROOT",
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("crate parent")
-            .parent()
-            .expect("repo root"),
+    let _guard = ENV_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tmp = tempfile::tempdir().expect("temporary install profile");
+    let home = tmp.path().to_path_buf();
+    // Exercise the development launcher independently of the operator's built
+    // bundles and stale build-time paths. Native bundle copying has separate
+    // hermetic coverage in the installation service tests.
+    let checkout = home.join("checkout");
+    fs::create_dir(&checkout).unwrap();
+    fs::write(checkout.join("Cargo.toml"), "[workspace]\n").unwrap();
+    let _restore = RestoreEnvironment(
+        ["HOME", "HEIWA_HOME", "HEIWA_ROOT"]
+            .into_iter()
+            .map(|name| (name, env::var_os(name)))
+            .collect(),
     );
-
-    let result = f(&tmp);
-
-    match original_home {
-        Some(v) => env::set_var("HOME", v),
-        None => env::remove_var("HOME"),
-    }
-    match original_root {
-        Some(v) => env::set_var("HEIWA_ROOT", v),
-        None => env::remove_var("HEIWA_ROOT"),
-    }
-    match original_heiwa_home {
-        Some(v) => env::set_var("HEIWA_HOME", v),
-        None => env::remove_var("HEIWA_HOME"),
-    }
-    let _ = fs::remove_dir_all(&tmp);
-
-    result
+    env::set_var("HOME", &home);
+    env::remove_var("HEIWA_HOME");
+    env::set_var("HEIWA_ROOT", &checkout);
+    f(&home)
 }
 
 #[test]
@@ -67,12 +80,7 @@ fn test_doctor_discovery() {
 
 #[test]
 fn test_ai_ops_doctor_checks_repo_hygiene_gates() {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("crate parent")
-        .parent()
-        .expect("repo root")
-        .to_path_buf();
+    let repo_root = repository_root();
     let report = check_ai_ops_at(&repo_root).expect("ai ops check should run");
 
     assert!(report.mcp_notion_http, "Notion MCP must be typed as http");

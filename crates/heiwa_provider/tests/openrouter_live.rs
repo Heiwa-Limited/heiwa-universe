@@ -8,15 +8,20 @@
 //! cargo test -p heiwa-provider --test openrouter_live -- --ignored --nocapture
 //! ```
 
-use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
-use heiwa_provider::providers::openrouter::OpenRouterAdapter;
+use heiwa_provider::adapter::{Message, Role, StreamEvent};
+use heiwa_provider::routing::resolve_adapter;
+use heiwa_provider::AccountRegistry;
 
 #[tokio::test]
 #[ignore = "requires keychain, registered OpenRouter account, and network"]
 async fn streams_a_completion_from_free_tier() {
-    let adapter = OpenRouterAdapter::from_registry()
-        .expect("an OpenRouter account must be registered for this test");
-    let models = adapter.supported_models();
+    let registry = AccountRegistry::load();
+    let models: Vec<String> = registry
+        .routable_models()
+        .into_iter()
+        .filter(|model| model.provider == "openrouter")
+        .map(|model| model.provider_model_id.clone())
+        .collect();
     assert!(!models.is_empty(), "account has at least one model");
 
     // Free-tier models are individually flaky (upstream 429s); the test
@@ -29,7 +34,8 @@ async fn streams_a_completion_from_free_tier() {
             content: "Reply with exactly: ok".to_string(),
         }];
 
-        let a = OpenRouterAdapter::from_registry().unwrap();
+        let a =
+            resolve_adapter("openrouter", model).expect("exact OpenRouter model must be admitted");
         let m = model.clone();
         let send = tokio::spawn(async move { a.send(&m, &messages, tx).await });
 

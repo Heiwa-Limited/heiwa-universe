@@ -226,6 +226,99 @@ class AppleHelperTransportTests(unittest.TestCase):
         self.assertEqual(response["error"], "selected_reminder_list_unavailable")
         self.assertFalse(any(line.startswith("fetch") for line in trace))
 
+    @staticmethod
+    def calendar_scan_request(**overrides) -> dict:
+        return {"operation": "scan", "calendar_ids": ["a"], "start": "2026-10-10T00:00:00Z",
+                "end": "2026-10-11T00:00:00Z", "limit": 500, **overrides}
+
+    def test_calendar_selection_is_validated_before_store_authorization_or_source_access(self) -> None:
+        for ids in (None, [], [""], [" "], ["a", "a"], ["x" * 1025], ["é" * 513], ["a\nb"], ["a\u0000b"], [str(i) for i in range(101)]):
+            with self.subTest(ids=ids):
+                response, trace = self.reminder_request(self.calendar_scan_request(calendar_ids=ids))
+                self.assertEqual(response["error"], "invalid_request")
+                self.assertEqual(trace, [])
+        for limit in (None, 0, 501, True, False, "1", 1.5, 10**30):
+            with self.subTest(limit=limit):
+                response, trace = self.reminder_request(self.calendar_scan_request(limit=limit))
+                self.assertEqual(response["error"], "invalid_request")
+                self.assertEqual(trace, [])
+        for date in (None, True, "", "PRIVATE_SENTINEL", "2026-10-10", "2026-13-10T00:00:00Z", "2026-02-30T00:00:00Z", "2026-10-10T24:00:00Z", "2026-10-10T00:00:00Ztrailing",
+                     "2026-10-10T00:00:00+99:99", "2026-10-10T00:00:00+00:60", "2026-10-10T00:00:00+2400"):
+            for field in ("start", "end"):
+                with self.subTest(field=field, date=date):
+                    response, trace = self.reminder_request(self.calendar_scan_request(**{field: date}))
+                    self.assertEqual(response["error"], "invalid_request")
+                    self.assertEqual(trace, [])
+        for start, end in (("2026-10-11T00:00:00Z", "2026-10-10T00:00:00Z"),
+                           ("2026-10-10T00:00:00Z", "2026-10-10T00:00:00Z"),
+                           ("2026-10-10T00:00:00Z", "2027-10-12T00:00:00Z")):
+            response, trace = self.reminder_request(self.calendar_scan_request(start=start, end=end))
+            self.assertEqual(response["error"], "invalid_request")
+            self.assertEqual(trace, [])
+        # Malformed data must refuse even when authorization would otherwise
+        # fail; validation must not depend on the machine's permission state.
+        response, trace = self.reminder_request(self.calendar_scan_request(calendar_ids=[]), {"event_access": "denied"})
+        self.assertEqual(response["error"], "invalid_request")
+        self.assertEqual(trace, [])
+
+    def test_provided_schema_version_and_calendar_list_boolean_are_checked_before_eventkit(self) -> None:
+        for operation in ("list", "scan", "plan_scan", "plan_apply", "reminders_list", "reminders_scan"):
+            for version in (None, 0, 2, 999, True, False, "1", 1.5, [], {}):
+                with self.subTest(operation=operation, version=version):
+                    request = self.calendar_scan_request(operation=operation, schema_version=version)
+                    response, trace = self.reminder_request(request)
+                    self.assertEqual(response["error"], "invalid_request")
+                    self.assertEqual(trace, [])
+        for value in (None, "true", 1, 0, [], {}):
+            with self.subTest(request_access=value):
+                response, trace = self.reminder_request({"operation": "list", "request_access": value})
+                self.assertEqual(response["error"], "invalid_request")
+                self.assertEqual(trace, [])
+
+    def test_valid_calendar_and_legacy_requests_still_reach_the_requested_read_path(self) -> None:
+        for version in ({}, {"schema_version": 1}):
+            for limit in (1, 500):
+                request = self.calendar_scan_request(limit=limit, **version)
+                response, trace = self.reminder_request(request, {"lists": [{"id": "a"}]})
+                self.assertNotIn("error", response)
+                self.assertEqual(response["calendar_ids"], ["a"])
+                self.assertEqual(response["start"], request["start"])
+                self.assertEqual(response["end"], request["end"])
+                self.assertEqual(response["events"], [])
+                self.assertIn("store", trace)
+                self.assertIn("predicate:event:a", trace)
+                self.assertIn("fetch:event", trace)
+                self.assertFalse(any("reminder" in line or line.startswith(("save", "remove", "commit")) for line in trace))
+            for request_access in ({}, {"request_access": False}, {"request_access": True}):
+                response, trace = self.reminder_request({"operation": "list", **request_access, **version})
+                self.assertIn("calendars", response)
+                self.assertIn("calendars:event", trace)
+            response, trace = self.reminder_request({"operation": "reminders_list", **version})
+            self.assertIn("lists", response)
+            self.assertFalse(any("event" in line for line in trace))
+        for start, end in (("2028-02-29T00:00:00Z", "2028-03-01T00:00:00Z"),
+                           ("2026-10-10T00:00:00-07:00", "2026-10-11T00:00:00-07:00"),
+                           ("2026-10-10T00:00:00+0700", "2026-10-11T00:00:00+0700"),
+                           ("2026-10-10T00:00:00Z", "2027-10-11T00:00:00Z")):
+            response, trace = self.reminder_request(self.calendar_scan_request(start=start, end=end), {"lists": [{"id": "a"}]})
+            self.assertNotIn("error", response)
+            self.assertIn("predicate:event:a", trace)
+        for version in ({}, {"schema_version": 1}):
+            response, trace = self.reminder_request({"operation": "plan_scan", "calendars": ["Tasks"],
+                "marker_prefix": "heiwa://calendar/plan/test/", "start": "2026-10-10T00:00:00Z",
+                "end": "2026-10-11T00:00:00Z", **version}, {"lists": [{"id": "a"}]})
+            self.assertEqual(response["marked"], [])
+            self.assertEqual(response["unmarked"], [])
+            self.assertIn("predicate:event:a", trace)
+            self.assertFalse(any(line.startswith(("save", "remove", "commit")) for line in trace))
+            response, trace = self.reminder_request({"operation": "plan_apply", "changes": [
+                {"op": "create", "marker": "heiwa://calendar/plan/test/e", "calendar": "Tasks", "title": "Synthetic",
+                 "start": "2026-10-10T00:00:00Z", "end": "2026-10-11T00:00:00Z"}], **version},
+                {"lists": [{"id": "a"}]})
+            self.assertEqual(response["applied"][0]["op"], "create")
+            self.assertEqual(trace.count("save:event"), 1)
+            self.assertEqual(trace.count("commit"), 1)
+
     def test_reminders_read_operations_never_admit_writes(self) -> None:
         for operation in ("reminders_apply", "reminders_save", "reminders_delete", "reminders_stage"):
             response, trace = self.reminder_request({"operation": operation, "request_access": True})
@@ -514,8 +607,11 @@ class EKEventStore {
         return NSObject()
     }
     func cancelFetchRequest(_ token: Any) { trace("cancel") }
-    func predicateForEvents(withStart start: Date, end: Date, calendars: [EKCalendar]?) -> NSPredicate { NSPredicate(value: false) }
-    func events(matching predicate: NSPredicate) -> [EKEvent] { [] }
+    func predicateForEvents(withStart start: Date, end: Date, calendars: [EKCalendar]?) -> NSPredicate {
+        trace("predicate:event:" + (calendars?.map { $0.calendarIdentifier }.joined(separator: ",") ?? "WILDCARD"))
+        return NSPredicate(value: false)
+    }
+    func events(matching predicate: NSPredicate) -> [EKEvent] { trace("fetch:event"); return [] }
     func event(withIdentifier id: String) -> EKEvent? { nil }
     func remove(_ event: EKEvent, span: EKSpan, commit: Bool) throws { trace("remove:event") }
     func save(_ event: EKEvent, span: EKSpan, commit: Bool) throws { trace("save:event") }

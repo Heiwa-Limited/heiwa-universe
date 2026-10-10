@@ -10,6 +10,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+mod approval_fixture;
+
 fn heiwa() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_heiwa"));
     command
@@ -81,6 +83,7 @@ fn dry_run_previews_hold_confirm_effect() {
 #[test]
 fn approve_flips_hold_status_and_writes_status_receipt() {
     let home = tempfile::tempdir().unwrap();
+    approval_fixture::provision_credential(home.path());
     let (request_id, hold_id) = stage(home.path());
 
     let out = heiwa()
@@ -149,6 +152,7 @@ fn approve_flips_hold_status_and_writes_status_receipt() {
 #[test]
 fn deny_drops_draft_hold_and_writes_drop_receipt() {
     let home = tempfile::tempdir().unwrap();
+    approval_fixture::provision_credential(home.path());
     let (request_id, hold_id) = stage(home.path());
 
     let out = heiwa()
@@ -202,6 +206,7 @@ fn deny_drops_draft_hold_and_writes_drop_receipt() {
 #[test]
 fn a_recorded_decision_is_idempotent_but_cannot_change_outcome() {
     let home = tempfile::tempdir().unwrap();
+    approval_fixture::provision_credential(home.path());
     let (request_id, _hold_id) = stage(home.path());
 
     let approved = heiwa()
@@ -240,4 +245,184 @@ fn a_recorded_decision_is_idempotent_but_cannot_change_outcome() {
     )
     .expect("decision JSON");
     assert_eq!(decision["outcome"], "approved");
+}
+
+#[test]
+fn integrity_env_only_credential_cannot_decide_or_apply_effects() {
+    let home = tempfile::tempdir().unwrap();
+    let (request_id, hold_id) = stage(home.path());
+    let out = heiwa()
+        .env("HOME", home.path())
+        .env("HEIWA_MACHINE_AUTH_TOKEN", "worker-controlled-env-token")
+        .args(["approvals", "decide", &request_id, "--approve", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "an env-only credential authorized an effect"
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("runtime credential"));
+    assert!(!home
+        .path()
+        .join(".heiwa/state/dispatch/approvals/decisions")
+        .exists());
+    let hold: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            home.path()
+                .join(".heiwa/state/calendar/holds")
+                .join(format!("{hold_id}.json")),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(hold["status"], "draft");
+}
+
+#[test]
+fn integrity_principal_and_tag_are_persisted() {
+    let home = tempfile::tempdir().unwrap();
+    approval_fixture::provision_credential(home.path());
+    let (request_id, _) = stage(home.path());
+    let out = heiwa()
+        .env("HOME", home.path())
+        .args(["approvals", "decide", &request_id, "--approve", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let payload: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let decision = &payload["data"]["decision"];
+    assert_eq!(
+        decision["principal"]["authenticated_by"],
+        "runtime_credential_file"
+    );
+    assert_eq!(
+        decision["principal"]["client_label_source"],
+        "self_reported"
+    );
+    assert!(decision["integrity"]["tag"]
+        .as_str()
+        .is_some_and(|tag| !tag.is_empty()));
+}
+
+#[test]
+fn integrity_preexisting_untagged_record_cannot_hide_or_replay() {
+    let home = tempfile::tempdir().unwrap();
+    approval_fixture::provision_credential(home.path());
+    let (request_id, hold_id) = stage(home.path());
+    let decisions = home
+        .path()
+        .join(".heiwa/state/dispatch/approvals/decisions");
+    fs::create_dir_all(&decisions).unwrap();
+    let path = decisions.join(format!("{request_id}.json"));
+    let forged = format!(r#"{{"id":"{request_id}","outcome":"approved"}}"#);
+    fs::write(&path, &forged).unwrap();
+    let out = heiwa()
+        .env("HOME", home.path())
+        .args(["approvals", "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let payload: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        payload["data"]["pending"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|request| request["id"] == request_id),
+        "forged historical record hid the request"
+    );
+    assert_eq!(
+        payload["data"]["decided"][0]["record_integrity"],
+        "untagged"
+    );
+    for flag in ["--approve", "--deny"] {
+        let out = heiwa()
+            .env("HOME", home.path())
+            .args(["approvals", "decide", &request_id, flag, "--json"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stdout).contains("reconciliation"));
+    }
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        forged,
+        "unverified history was overwritten"
+    );
+    let hold: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            home.path()
+                .join(".heiwa/state/calendar/holds")
+                .join(format!("{hold_id}.json")),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(hold["status"], "draft");
+    assert!(!home
+        .path()
+        .join(".heiwa/secrets/decision-legacy.json")
+        .exists());
+}
+
+#[test]
+fn integrity_tampering_key_rotation_and_linked_records_are_not_replayable() {
+    let home = tempfile::tempdir().unwrap();
+    approval_fixture::provision_credential(home.path());
+    let (request_id, _) = stage(home.path());
+    let out = heiwa()
+        .env("HOME", home.path())
+        .args(["approvals", "decide", &request_id, "--approve", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let path = home
+        .path()
+        .join(".heiwa/state/dispatch/approvals/decisions")
+        .join(format!("{request_id}.json"));
+    let original = fs::read(&path).unwrap();
+    let mut modified: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    modified["effects"][0]["target"] = serde_json::json!("changed-target");
+    let tampered = serde_json::to_vec(&modified).unwrap();
+    fs::write(&path, &tampered).unwrap();
+    let out = heiwa()
+        .env("HOME", home.path())
+        .args(["approvals", "decide", &request_id, "--approve", "--json"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("tag_mismatch"));
+    assert_eq!(fs::read(&path).unwrap(), tampered);
+    fs::write(&path, &original).unwrap();
+    approval_fixture::provision_credential_with_token(home.path(), "a-different-credential");
+    let out = heiwa()
+        .env("HOME", home.path())
+        .args(["approvals", "decide", &request_id, "--approve", "--json"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("tag_mismatch"));
+    assert_eq!(fs::read(&path).unwrap(), original);
+    #[cfg(unix)]
+    {
+        approval_fixture::provision_credential(home.path());
+        let elsewhere = home.path().join("sealed-elsewhere.json");
+        fs::rename(&path, &elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &path).unwrap();
+        let out = heiwa()
+            .env("HOME", home.path())
+            .args(["approvals", "decide", &request_id, "--approve", "--json"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stdout).contains("nonregular"));
+        assert!(fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
 }

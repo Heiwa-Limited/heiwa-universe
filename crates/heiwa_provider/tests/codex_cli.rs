@@ -1,7 +1,10 @@
 #![cfg(unix)]
 
-use heiwa_provider::adapter::{Message, ProviderAdapter, Role, StreamEvent};
-use heiwa_provider::providers::codex_cli::CodexCliAdapter;
+use heiwa_provider::adapter::{Message, Role, StreamEvent};
+use heiwa_provider::{
+    AccountRegistry, AccountStatus, Credential, DetectedModel, InventoryTruth, PriceTruth,
+    ProviderAccount,
+};
 use serde_json::{json, Value};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -78,7 +81,50 @@ async fn codex_fixture_driver() {
     };
     let (tx, mut rx) = mpsc::channel(32);
     let send = async move {
-        CodexCliAdapter::new()
+        let model = DetectedModel {
+            model_id: "fixture-model".into(),
+            provider_model_id: "fixture-model".into(),
+            provider: "openai".into(),
+            account_id: "openai-cli-fixture".into(),
+            rate_group: "openai_sub".into(),
+            capability_class: 4,
+            context_window: 32_000,
+            supports_streaming: true,
+            supports_tools: true,
+            supports_vision: false,
+            supports_audio: false,
+            cost_per_1k_input: 0.0,
+            cost_per_1k_output: 0.0,
+            price_truth: PriceTruth::Unknown,
+            inventory_truth: InventoryTruth::Verified,
+        };
+        let registry = AccountRegistry::from_accounts(vec![ProviderAccount {
+            account_id: model.account_id.clone(),
+            provider: model.provider.clone(),
+            credential: Credential::OauthCli {
+                binary: "codex".into(),
+            },
+            rate_group: model.rate_group.clone(),
+            status: AccountStatus::Connected,
+            models: vec![model],
+        }]);
+        let adapter = match heiwa_provider::routing::resolve_adapter_with(
+            &registry,
+            "codex",
+            "fixture-model",
+            None,
+        ) {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                let _ = tx
+                    .send(StreamEvent::Error(format!(
+                        "Codex admission denied: {error}"
+                    )))
+                    .await;
+                return Err(anyhow::anyhow!("Codex admission denied: {error}"));
+            }
+        };
+        adapter
             .send(
                 "fixture-model",
                 &[Message {

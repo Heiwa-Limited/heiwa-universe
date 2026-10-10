@@ -271,3 +271,24 @@ def test_check_gemini_config_requires_auto_edit_and_agents():
     assert all("auto_edit" not in e for e in errors), errors
     assert all("enablePermanentToolApproval" not in e for e in errors), errors
     assert all("enableAgents" not in e for e in errors), errors
+
+
+def test_config_rejects_duplicate_process_server(monkeypatch, tmp_path):
+    import sync_agents
+    config = (sync_agents.REPO_ROOT / ".codex/config.toml").read_text()
+    config += '\n[mcp_servers.duplicate_docker]\ncommand = "docker"\nargs = ["mcp", "gateway", "run"]\n'
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex/config.toml").write_text(config)
+    monkeypatch.setattr(sync_agents, "REPO_ROOT", tmp_path)
+    assert any("duplicate" in error and "MCP_DOCKER" in error and "duplicate_docker" in error
+               for error in sync_agents.check_codex_config())
+
+
+def test_config_distinguishes_servers_with_different_environments(monkeypatch, tmp_path):
+    import sync_agents
+    config = (sync_agents.REPO_ROOT / ".codex/config.toml").read_text()
+    config += '\n[mcp_servers.separate_docker]\ncommand = "docker"\nargs = ["mcp", "gateway", "run"]\nenv = { MCP_PROFILE = "isolated" }\n'
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex/config.toml").write_text(config)
+    monkeypatch.setattr(sync_agents, "REPO_ROOT", tmp_path)
+    assert sync_agents.check_codex_config() == []

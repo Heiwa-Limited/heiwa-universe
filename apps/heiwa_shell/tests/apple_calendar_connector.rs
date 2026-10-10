@@ -11,9 +11,11 @@ use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
+mod approval_fixture;
 mod cli_v1;
 
 fn fixture_osascript(root: &Path) -> PathBuf {
@@ -73,12 +75,21 @@ impl Drop for ChildGuard {
     }
 }
 
-fn available_port() -> u16 {
-    TcpListener::bind(("127.0.0.1", 0))
+fn available_port() -> (u16, MutexGuard<'static, ()>) {
+    // Keep allocation-to-bind exclusive among these test cases, and bound
+    // concurrent fresh Lance initialization. A parallel full gate timed out
+    // waiting for a runtime; only startup is serialized. API cases still
+    // run concurrently once their own isolated runtime is ready.
+    static STARTUP: Mutex<()> = Mutex::new(());
+    let startup = STARTUP
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let port = TcpListener::bind(("127.0.0.1", 0))
         .expect("bind ephemeral port")
         .local_addr()
         .expect("ephemeral address")
-        .port()
+        .port();
+    (port, startup)
 }
 
 /// Wait until the runtime can actually serve a request.
@@ -220,6 +231,7 @@ impl Fixture {
     }
 
     fn establish_local_identity(&self) {
+        approval_fixture::provision_credential_with_token(&self.home, "apple-connector-test-token");
         let root = self.home.join(".heiwa");
         fs::create_dir_all(&root).expect("create Heiwa root");
         fs::write(
@@ -255,18 +267,19 @@ fn background_runtime_falls_back_to_calendar_app_discovery_when_eventkit_helper_
     let fixture = Fixture::new();
     fixture.connect_apple_calendar_cli();
     let helper = fixture_failing_eventkit_helper(fixture._root.path());
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = fixture
         .heiwa()
         .env("HEIWA_APPLE_RESOURCES_HELPER", &helper)
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
 
     let resources = response_json(&get(port, "/api/v1/calendar/resources"));
     assert_eq!(resources["data"]["status"], "ready");
@@ -281,17 +294,18 @@ fn background_runtime_falls_back_to_calendar_app_discovery_when_eventkit_helper_
 fn stranger_app_keeps_apple_calendar_private_until_this_profile_connects_it() {
     let fixture = Fixture::new();
     fixture.establish_local_identity();
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = fixture
         .heiwa()
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
 
     let before = response_json(&get(port, "/api/v1/calendar/resources"));
     assert_eq!(before["data"]["status"], "disconnected");
@@ -358,17 +372,18 @@ fn stranger_app_keeps_apple_calendar_private_until_this_profile_connects_it() {
 fn authenticated_app_approval_endpoint_executes_the_existing_connector_effect() {
     let fixture = Fixture::new();
     fixture.establish_local_identity();
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = fixture
         .heiwa()
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
 
     let connected = post_json(
         port,
@@ -700,17 +715,18 @@ fn approval_executes_apple_write_and_replays_connector_receipt() {
 fn authenticated_app_hold_endpoint_stages_named_apple_promotion() {
     let fixture = Fixture::new();
     fixture.establish_local_identity();
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = fixture
         .heiwa()
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
 
     let connected = post_json(
         port,
@@ -854,6 +870,170 @@ print(json.dumps(result))
     assert_eq!(calls_before, fs::read(&calls).unwrap());
 }
 
+#[test]
+fn calendar_selection_api_persists_without_reading_and_refuses_stale_or_invalid_choices() {
+    let fixture = Fixture::new();
+    fixture.establish_local_identity();
+    let helper = fixture._root.path().join("selection-helper");
+    let catalog = fixture._root.path().join("calendar-catalog.json");
+    let calls = fixture._root.path().join("selection-helper-calls");
+    fs::write(&catalog, r#"[{"id":"work","name":"Work","writable":true},{"id":"life","name":"Life","writable":true}]"#).unwrap();
+    fs::write(&helper, r#"#!/usr/bin/env python3
+import json, os, sys
+assert len(sys.argv) == 1
+request = json.load(sys.stdin)
+with open(os.environ['FIXTURE_CALLS'], 'a') as log: log.write(request['operation'] + '\n')
+assert request['operation'] == 'list', 'selection must never invoke EventKit scanning'
+print(json.dumps({'schema_version': 1, 'calendars': json.load(open(os.environ['FIXTURE_CATALOG']))}))
+"#).unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+    let command = || {
+        let mut command = fixture.heiwa();
+        command
+            .env("HEIWA_APPLE_RESOURCES_HELPER", &helper)
+            .env("FIXTURE_CALLS", &calls)
+            .env("FIXTURE_CATALOG", &catalog)
+            .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token");
+        command
+    };
+    assert!(command()
+        .args(["connect", "apple-calendar", "--authorize"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let state = fixture.home.join(".heiwa/state/calendar");
+    fs::create_dir_all(&state).unwrap();
+    let snapshot = state.join("events.jsonl");
+    let prior_events = "{\"id\":\"existing-local-event\"}\n";
+    fs::write(&snapshot, prior_events).unwrap();
+    let (port, startup) = available_port();
+    let _child = ChildGuard(
+        command()
+            .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap(),
+    );
+    wait_for_runtime(port);
+    drop(startup);
+    let resources = response_json(&get(port, "/api/v1/calendar/resources"));
+    let revision = resources["data"]["catalog_revision"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let before_calls = fs::read(&calls).unwrap();
+    let selected = post_json(
+        port,
+        "/api/v1/calendar/select",
+        &serde_json::json!({"calendar_ids":["work","life"],"catalog_revision":revision}),
+    );
+    assert!(selected.starts_with("HTTP/1.1 200"), "{selected}");
+    assert_eq!(
+        response_json(&selected)["data"]["selected_ids"],
+        serde_json::json!(["work", "life"])
+    );
+    assert_eq!(
+        fs::read(&calls).unwrap(),
+        before_calls,
+        "saving choices must not invoke the native helper"
+    );
+    assert_eq!(fs::read_to_string(&snapshot).unwrap(), prior_events);
+    assert!(!state.join("receipts").exists());
+    let selection_path = state.join("apple_selection.json");
+    let before_selection = fs::read(&selection_path).unwrap();
+    for request in [
+        serde_json::json!({"calendar_ids":["unknown"],"catalog_revision":revision}),
+        serde_json::json!({"calendar_ids":["work","work"],"catalog_revision":revision}),
+        serde_json::json!({"calendar_ids":[""],"catalog_revision":revision}),
+        serde_json::json!({"calendar_ids":[null],"catalog_revision":revision}),
+        serde_json::json!({"calendar_ids":["work"],"catalog_revision":revision,"read":true}),
+    ] {
+        let response = post_json(port, "/api/v1/calendar/select", &request);
+        assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+        assert_eq!(fs::read(&selection_path).unwrap(), before_selection);
+        assert_eq!(fs::read(&calls).unwrap(), before_calls);
+    }
+    let reread = response_json(&get(port, "/api/v1/calendar/resources"));
+    assert_eq!(
+        reread["data"]["selected_ids"],
+        serde_json::json!(["work", "life"])
+    );
+    let newer = post_json(
+        port,
+        "/api/v1/calendar/select",
+        &serde_json::json!({"calendar_ids":["life"],"catalog_revision":revision}),
+    );
+    assert!(newer.starts_with("HTTP/1.1 200"));
+    let before_selection = fs::read(&selection_path).unwrap();
+    let before_calls = fs::read(&calls).unwrap();
+    let stale_read = post_json(
+        port,
+        "/api/v1/calendar/read",
+        &serde_json::json!({"calendar_ids":["work","life"]}),
+    );
+    assert!(stale_read.starts_with("HTTP/1.1 400"), "{stale_read}");
+    let empty_read = post_json(
+        port,
+        "/api/v1/calendar/read",
+        &serde_json::json!({"calendar_ids":[]}),
+    );
+    assert!(empty_read.starts_with("HTTP/1.1 400"), "{empty_read}");
+    assert_eq!(fs::read(&selection_path).unwrap(), before_selection);
+    assert_eq!(
+        fs::read(&calls).unwrap(),
+        before_calls,
+        "stale import intentions must be refused before any helper call"
+    );
+    assert_eq!(fs::read_to_string(&snapshot).unwrap(), prior_events);
+    fs::write(&catalog, r#"[{"id":"life","name":"Life","writable":true}]"#).unwrap();
+    let refreshed = response_json(&get(port, "/api/v1/calendar/resources"));
+    let fresh_revision = refreshed["data"]["catalog_revision"].as_str().unwrap();
+    assert_ne!(revision, fresh_revision);
+    let stale = post_json(
+        port,
+        "/api/v1/calendar/select",
+        &serde_json::json!({"calendar_ids":["life"],"catalog_revision":revision}),
+    );
+    assert!(stale.starts_with("HTTP/1.1 400"));
+    assert_eq!(fs::read(&selection_path).unwrap(), before_selection);
+    let before_calls = fs::read(&calls).unwrap();
+    let empty = post_json(
+        port,
+        "/api/v1/calendar/select",
+        &serde_json::json!({"calendar_ids":[],"catalog_revision":fresh_revision}),
+    );
+    assert!(empty.starts_with("HTTP/1.1 200"), "{empty}");
+    assert_eq!(
+        response_json(&empty)["data"]["selected_ids"],
+        serde_json::json!([])
+    );
+    let synced = response_json(&post_json(
+        port,
+        "/api/v1/calendar/sync",
+        &serde_json::json!({"force":true}),
+    ));
+    assert_eq!(synced["data"]["status"], "no_selection");
+    assert_eq!(fs::read(&calls).unwrap(), before_calls);
+    assert_eq!(fs::read_to_string(&snapshot).unwrap(), prior_events);
+    assert!(post_json(
+        port,
+        "/api/v1/connectors/apple_calendar/disconnect",
+        &serde_json::json!({})
+    )
+    .starts_with("HTTP/1.1 200"));
+    let before = fs::read(&selection_path).unwrap();
+    let refused = post_json(
+        port,
+        "/api/v1/calendar/select",
+        &serde_json::json!({"calendar_ids":["life"],"catalog_revision":fresh_revision}),
+    );
+    assert!(refused.starts_with("HTTP/1.1 400"));
+    assert_eq!(fs::read(&selection_path).unwrap(), before);
+    assert_eq!(fs::read(&calls).unwrap(), before_calls);
+}
+
 /// A reader that answers like EventKit through the helper: events overlapping
 /// the requested range, in start order, but at most two per response.
 const PAGING_EVENTKIT_FIXTURE: &str = r#"#!/usr/bin/env python3
@@ -971,16 +1151,17 @@ fn live_sync_reads_past_one_reader_page_and_serves_local_days() {
     events.retain(|event| event["external_id"] != "next-month");
     fs::write(&source, serde_json::Value::from(events).to_string()).unwrap();
 
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = command()
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
 
     let synced = response_json(&post_json(
         port,
@@ -1040,4 +1221,159 @@ fn live_sync_reads_past_one_reader_page_and_serves_local_days() {
         "/api/v1/calendar/events?from=2026-01-10&to=2026-01-01",
     );
     assert!(backwards.starts_with("HTTP/1.1 400"), "{backwards}");
+}
+
+/// Exercise the real HTTP auth subject and decision service without enrolling
+/// Apple resources. The only possible effect is a synthetic local hold.
+#[test]
+fn http_decision_authority_rejects_user_jwt_and_mismatched_runtime_key() {
+    fn request(port: u16, method: &str, target: &str, token: &str) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let body = if method == "POST" { "{}" } else { "" };
+        write!(stream, "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nx-heiwa-client: fixture-client\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    }
+    fn stage(fixture: &Fixture) -> (String, String) {
+        let output = fixture
+            .heiwa()
+            .args([
+                "schedule",
+                "authority proof",
+                "--at",
+                "2026-06-19T15:00",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        (
+            value["approval_request"]["request_id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+            value["hold"]["id"].as_str().unwrap().to_string(),
+        )
+    }
+    fn assert_untouched(fixture: &Fixture, request_id: &str, hold_id: &str) {
+        assert!(!fixture
+            .home
+            .join(".heiwa/state/dispatch/approvals/decisions")
+            .join(format!("{request_id}.json"))
+            .exists());
+        let hold: serde_json::Value = serde_json::from_slice(
+            &fs::read(
+                fixture
+                    .home
+                    .join(".heiwa/state/calendar/holds")
+                    .join(format!("{hold_id}.json")),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(hold["status"], "draft");
+        assert!(!fixture
+            .home
+            .join(".heiwa/state/calendar/receipts")
+            .join(format!("rcpt-{hold_id}-status-confirmed.json"))
+            .exists());
+        assert!(
+            !fixture.log.exists(),
+            "no Apple resource call belongs to authority verification"
+        );
+    }
+    const JWT_KEY: &str = "isolated-jwt-signing-key";
+    let fixture = Fixture::new();
+    fixture.establish_local_identity();
+    let (request_id, hold_id) = stage(&fixture);
+    let (port, startup) = available_port();
+    let child = fixture
+        .heiwa()
+        .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
+        .env("HEIWA_JWT_SIGNING_SECRET", JWT_KEY)
+        .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let child = ChildGuard(child);
+    wait_for_runtime(port);
+    drop(startup);
+    let now = chrono::Utc::now().timestamp();
+    let claims = heiwa_core::auth::AuthClaims {
+        sub: "test-user".into(),
+        owner_id: "test-user".into(),
+        principal_id: "test-user".into(),
+        username: None,
+        discord_user_id: None,
+        iat: now,
+        exp: now + 600,
+        iss: "heiwa-core".into(),
+        aud: "heiwa".into(),
+    };
+    let jwt = heiwa_core::auth::sign_jwt(&claims, JWT_KEY).unwrap();
+    assert!(
+        request(port, "GET", "/api/v1/approvals", &jwt).starts_with("HTTP/1.1 200"),
+        "positive control: User JWT authenticates ordinary API reads"
+    );
+    let target = format!("/api/v1/approvals/{request_id}/approve");
+    let denied = request(port, "POST", &target, &jwt);
+    assert!(
+        denied.starts_with("HTTP/1.1 403"),
+        "User JWT was treated as operator authority: {denied}"
+    );
+    assert_untouched(&fixture, &request_id, &hold_id);
+    let approved = request(port, "POST", &target, "apple-connector-test-token");
+    assert!(
+        approved.starts_with("HTTP/1.1 200"),
+        "operator positive control: {approved}"
+    );
+    let record = &response_json(&approved)["data"]["decision"];
+    assert_eq!(record["principal"]["authenticated_by"], "runtime_request");
+    assert_eq!(record["principal"]["client_label_source"], "self_reported");
+    assert_eq!(
+        heiwa_core::integrity::classify_decision(
+            Some("apple-connector-test-token"),
+            &request_id,
+            record
+        ),
+        heiwa_core::integrity::DecisionIntegrity::Verified
+    );
+    drop(child);
+
+    let (request_id, hold_id) = stage(&fixture);
+    let (port, startup) = available_port();
+    let child = fixture
+        .heiwa()
+        .env("HEIWA_MACHINE_AUTH_TOKEN", "runtime-env-override")
+        .env("HEIWA_JWT_SIGNING_SECRET", JWT_KEY)
+        .args(["app", "start", "--port", &port.to_string(), "--no-open"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let _child = ChildGuard(child);
+    wait_for_runtime(port);
+    drop(startup);
+    assert!(
+        request(port, "GET", "/api/v1/approvals", "runtime-env-override")
+            .starts_with("HTTP/1.1 200")
+    );
+    let denied = request(
+        port,
+        "POST",
+        &format!("/api/v1/approvals/{request_id}/approve"),
+        "runtime-env-override",
+    );
+    assert!(
+        denied.starts_with("HTTP/1.1 403"),
+        "runtime/file credential mismatch authorized effects: {denied}"
+    );
+    assert_untouched(&fixture, &request_id, &hold_id);
 }

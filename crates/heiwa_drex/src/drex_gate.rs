@@ -122,7 +122,13 @@ pub fn wait_for_decision_cancellable(
     timeout: Duration,
     cancelled: &AtomicBool,
 ) -> Result<String> {
-    let decision_path = get_state_dir()
+    if !heiwa_core::integrity::valid_decision_id(request_id) {
+        return Err(anyhow!("invalid approval request id"));
+    }
+    let paths = heiwa_config::HeiwaPaths::try_resolve()
+        .ok_or_else(|| anyhow!("runtime root unavailable for approval verification"))?;
+    let decision_path = paths
+        .state_dir
         .join("dispatch")
         .join("approvals")
         .join("decisions")
@@ -137,12 +143,32 @@ pub fn wait_for_decision_cancellable(
         if cancelled.load(Ordering::Acquire) {
             return Err(anyhow!("approval wait cancelled for {}", request_id));
         }
-        if decision_path.exists() {
-            let raw = fs::read_to_string(&decision_path)?;
-            let parsed: serde_json::Value = serde_json::from_str(&raw)?;
-            if let Some(outcome) = parsed.get("outcome").and_then(serde_json::Value::as_str) {
-                return Ok(outcome.to_string());
+        match fs::symlink_metadata(&decision_path) {
+            Ok(metadata) => {
+                if !metadata.is_file() || metadata.file_type().is_symlink() {
+                    return Err(anyhow!("decision integrity verification failed: nonregular record; reconciliation needed"));
+                }
+                let parsed = heiwa_core::integrity::read_decision_record(&decision_path)
+                    .map_err(|_| anyhow!("decision integrity verification failed: unreadable or malformed record; reconciliation needed"))?;
+                let key = heiwa_core::config::read_runtime_secret_file(
+                    &paths.runtime_root,
+                    "machine_auth_token",
+                );
+                let integrity =
+                    heiwa_core::integrity::classify_decision(key.as_deref(), request_id, &parsed);
+                if integrity != heiwa_core::integrity::DecisionIntegrity::Verified {
+                    return Err(anyhow!(
+                        "decision integrity verification failed: {}; reconciliation needed",
+                        integrity.as_str()
+                    ));
+                }
+                return Ok(parsed["outcome"]
+                    .as_str()
+                    .expect("verified outcome")
+                    .to_string());
             }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
         }
         std::thread::sleep(poll_interval);
     }
@@ -277,11 +303,22 @@ mod tests {
             fs::create_dir_all(&decision_dir).unwrap();
             let decision_path = decision_dir.join(format!("{}.json", request_id));
 
-            let decision_json = json!({
-                "request_id": request_id,
+            let secrets = temp.path().join(".heiwa/secrets");
+            fs::create_dir_all(&secrets).unwrap();
+            let key_file = secrets.join("machine_auth_token");
+            fs::write(&key_file, "test-decision-key").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700)).unwrap();
+                fs::set_permissions(&key_file, fs::Permissions::from_mode(0o600)).unwrap();
+            }
+            let mut decision_json = json!({
+                "id": request_id,
                 "outcome": "approved",
                 "decided_at_utc": chrono::Utc::now().to_rfc3339()
             });
+            heiwa_core::integrity::seal_decision("test-decision-key", &mut decision_json).unwrap();
             fs::write(
                 &decision_path,
                 serde_json::to_string_pretty(&decision_json).unwrap(),
@@ -293,6 +330,96 @@ mod tests {
         } else {
             panic!("Expected AwaitingApproval verdict");
         }
+    }
+
+    #[test]
+    fn an_untagged_or_wrong_id_record_cannot_authorize_a_wait() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let temp = tempdir().unwrap();
+        let _home = EnvGuard::set("HOME", temp.path());
+        let _heiwa_home = EnvGuard::remove("HEIWA_HOME");
+        let _state_dir = EnvGuard::remove("HEIWA_STATE_DIR");
+        let directory = temp
+            .path()
+            .join(".heiwa/state/dispatch/approvals/decisions");
+        fs::create_dir_all(&directory).unwrap();
+        for record in [
+            json!({"id":"req_forged","outcome":"approved"}),
+            json!({"id":"req_other","outcome":"approved"}),
+        ] {
+            fs::write(directory.join("req_forged.json"), record.to_string()).unwrap();
+            let error = wait_for_decision("req_forged", Duration::from_millis(150))
+                .expect_err("forged record cannot authorize effects");
+            assert!(error.to_string().contains("integrity"));
+        }
+    }
+
+    #[test]
+    fn waits_require_the_file_key_and_an_untampered_allowlisted_outcome() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let temp = tempdir().unwrap();
+        let _home = EnvGuard::set("HOME", temp.path());
+        let _heiwa_home = EnvGuard::remove("HEIWA_HOME");
+        let _state_dir = EnvGuard::remove("HEIWA_STATE_DIR");
+        let _env_key = EnvGuard::set("HEIWA_MACHINE_AUTH_TOKEN", "key-a");
+        let directory = temp
+            .path()
+            .join(".heiwa/state/dispatch/approvals/decisions");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("req_a.json");
+        let mut record = json!({"id":"req_a", "outcome":"approved"});
+        heiwa_core::integrity::seal_decision("key-a", &mut record).unwrap();
+        fs::write(&path, record.to_string()).unwrap();
+        assert!(
+            wait_for_decision("req_a", Duration::from_millis(150))
+                .unwrap_err()
+                .to_string()
+                .contains("unverifiable"),
+            "environment presence cannot be authority"
+        );
+        let secrets = temp.path().join(".heiwa/secrets");
+        fs::create_dir(&secrets).unwrap();
+        let key_file = secrets.join("machine_auth_token");
+        fs::write(&key_file, "key-a").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::set_permissions(&key_file, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert_eq!(
+            wait_for_decision("req_a", Duration::from_millis(150)).unwrap(),
+            "approved"
+        );
+        let mut denied = json!({"id":"req_a", "outcome":"denied"});
+        heiwa_core::integrity::seal_decision("key-a", &mut denied).unwrap();
+        fs::write(&path, denied.to_string()).unwrap();
+        assert_eq!(
+            wait_for_decision("req_a", Duration::from_millis(150)).unwrap(),
+            "denied"
+        );
+        record["outcome"] = json!("denied");
+        fs::write(&path, record.to_string()).unwrap();
+        assert!(wait_for_decision("req_a", Duration::from_millis(150))
+            .unwrap_err()
+            .to_string()
+            .contains("tag_mismatch"));
+        let mut invalid_outcome = json!({"id":"req_a", "outcome":"run-anything"});
+        let tag = heiwa_core::integrity::decision_tag("key-a", &invalid_outcome).unwrap();
+        invalid_outcome["integrity"] = json!({"version":"1","alg":"hmac-sha256","tag":tag});
+        fs::write(&path, invalid_outcome.to_string()).unwrap();
+        assert!(wait_for_decision("req_a", Duration::from_millis(150))
+            .unwrap_err()
+            .to_string()
+            .contains("invalid_outcome"));
+        assert!(wait_for_decision("../req_a", Duration::from_millis(150))
+            .unwrap_err()
+            .to_string()
+            .contains("invalid approval"));
+        assert!(wait_for_decision("req_absent", Duration::from_millis(1))
+            .unwrap_err()
+            .to_string()
+            .contains("Timeout"));
     }
 
     #[test]

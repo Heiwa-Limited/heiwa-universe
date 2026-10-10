@@ -395,6 +395,7 @@ This records current local development evidence, not release acceptance.
 | --- | --- | --- | --- |
 | C1-a | Authority, containment, grants, Work-scoped submission | doing | Offline fixture probe and 8 regression tests pass on macOS; whole-provider enforcement and runtime authority integration remain. See `docs/superpowers/plans/2026-09-27-engines-c1a-enforcement.md`. |
 | C1-a1 | Explicit desktop continuation of existing Work | done | 212 desktop, 9 packaging, 45 shell library, 22 operator HTTP, and 58 session-service tests pass. L0 gate passes with updated seam hashes. Rust exposes and revalidates admitted membership; old runtimes fail before submission, lost acknowledgements retain request identity, and ordinary chat remains unscoped. No automatic Work creation, engine admission, installation, or release is claimed. |
+| C1-a2 | File-bound operator decisions and verified decision consumers | done | Private-reader/integrity, CLI and DREX forgery, Mail staging and real hermetic HTTP regressions pass; independent source review confirms file-bound Operator authority and verified consumers. Contract: `docs/superpowers/plans/2026-09-28-engines-c1a2-decision-authority.md`. This accepts the bounded implementation; promotion still requires the frozen gate and matching device proof below. No same-user worker containment or legacy auto-migration is claimed. |
 | C1-b | Shared tools and recoverable Apple effects | pending | Reminders R1 is CLI read/propose only: separate enrollment/permission, selected lists, imported Calendar-event proposal and honest incomplete/ambiguous scans. Source/hermetic progress is not device or write acceptance. Runtime authority/containment and persisted write-result proof remain required; no Reminders write acceptance claimed. |
 | C1-c | Claude and Ollama execution families | pending | Offline Seatbelt canaries do not admit a provider engine. |
 | C1-d | Lightweight answers, allowance pools, and surfaces | pending | Bounded read-only tools remain eligible for Answer; routing not implemented here. |
@@ -404,3 +405,20 @@ This records current local development evidence, not release acceptance.
 Verification for the offline C1-a spike:
 `python3 -m unittest discover -s scripts/tests -p test_engine_enforcement_probe.py -v`
 and `python3 scripts/probe_engine_enforcement.py`.
+
+## Cohesive desktop/runtime integration — 2026-10-10
+
+These rows record implemented behavior and targeted regression acceptance.
+Protected delivery additionally requires clean frozen source gates, independent
+review and a matching isolated development bundle on device. A row or green CI
+alone does not prove delivery; installed and public release evidence remain
+distinct. Whole-provider containment, fresh inference eligibility and recoverable
+Reminders writes remain the unfinished C1 boundaries above.
+
+| Slice | Plane | Status | Evidence / boundary |
+| --- | --- | --- | --- |
+| Calendar choice persistence | Intake | done | 36 targeted UI, 13 service and 12 hermetic connector tests pass. Saving is independent of import; stable rows, empty deselection and stale/invalid requests are covered, including the native POST allowlist. No new Apple permission/content acceptance is claimed. |
+| Provider callers-first admission | Execution | done | 145 provider tests, 16 Codex fixtures and 24 executor tests pass, with failing baseline/mutation evidence. Private exact-account/model witnesses prevent fallback and inventory borrowing; production admission is rebuilt before ranking and revalidated before send. Local/CI structural gates protect the boundary. This is LegacyCurrentTruth, not fresh inference eligibility. |
+| Project MCP configuration | Evidence | done | 33 instruction-sync tests pass, including genuine duplicate-process rejection. The reviewed configuration contains one Docker gateway and omits the unsupported Git npm registration. Operator configuration loading is verified separately after protected delivery; a running GUI session does not automatically reload. |
+| Apple helper input admission | Intake | done | 14 complete native/fake-SDK tests pass; baseline rejection cases failed and restoring late Calendar validation fails 43 cases. Scan IDs/ranges/limits, list permission intent and supplied schema are checked before EventKit access. Valid legacy requests remain supported; plan write authority is unchanged. |
+| Portable verification fixtures | Evidence | done | Install fixtures use owned minimal checkouts, source scans/receipts use the package Cargo is testing, and Calendar runtime startup is bounded through readiness. Golden, ACL, install, routing and connector regressions pass without depending on deleted build-time paths. Full-gate/device receipts still bind each delivery checkpoint to its actual revision. |

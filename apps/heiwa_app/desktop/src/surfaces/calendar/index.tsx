@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from "solid-js";
 import { localIsoDate, parseLocalDate } from "../../lib/format";
+import { runtimeErrorMessage } from "../../runtime";
 import { useApp } from "../../state/app";
 import {
   addIsoDays,
@@ -449,7 +450,7 @@ function ConnectionPanel() {
       await app.runtime.connectAppleCalendar();
       await app.runtime.syncCalendar({ force: true });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(runtimeErrorMessage(cause, "Apple Calendar could not be connected. Try again."));
     } finally {
       setBusy(false);
     }
@@ -470,37 +471,60 @@ function ConnectionPanel() {
       >
         Connect Apple Calendar
       </button>
-      <Show when={error()}>{(message) => <p class="surface-error">{message()}</p>}</Show>
+      <Show when={error()}>{(message) => <p class="surface-error" role="alert">{message()}</p>}</Show>
     </section>
   );
 }
 
 function CalendarSettings() {
   const app = useApp();
-  const [selection, setSelection] = createSignal<string[] | null>(null);
   const [readBusy, setReadBusy] = createSignal(false);
   const [notice, setNotice] = createSignal<string | null>(null);
   const [error, setError] = createSignal<string | null>(null);
   const [disconnecting, setDisconnecting] = createSignal(false);
   const saved = () => app.runtime.calendarResources()?.selected_ids ?? [];
-  const selectedIds = () => selection() ?? saved();
-  const calendars = () => app.runtime.calendarResources()?.calendars.filter((calendar) => calendar.id) ?? [];
+  const pending = app.runtime.calendarSelection;
+  const selectedIds = () => pending()?.ids ?? saved();
+  const calendarsById = createMemo(() => new Map(
+    (app.runtime.calendarResources()?.calendars ?? [])
+      .filter((calendar) => calendar.id)
+      .map((calendar) => [calendar.id!, calendar]),
+  ));
+  // Resource refreshes replace object projections. Primitive IDs retain the
+  // row nodes, focus and value association across those acknowledgements.
+  const calendarIds = createMemo<string[]>((previous) => {
+    const current = [...calendarsById().keys()];
+    const retained = previous.filter((id) => calendarsById().has(id));
+    return [...retained, ...current.filter((id) => !previous.includes(id))];
+  }, []);
+
+  function choose(id: string, checked: boolean): void {
+    setNotice(null);
+    const ids = selectedIds().filter((selected) => selected !== id);
+    if (checked) ids.push(id);
+    void app.runtime.selectAppleCalendars(ids);
+  }
+
+  async function retrySelection(): Promise<void> {
+    const ids = [...selectedIds()];
+    await app.runtime.loadCalendarResources();
+    await app.runtime.selectAppleCalendars(ids);
+  }
 
   async function syncSelected(): Promise<void> {
-    if (readBusy() || !selectedIds().length) return;
+    if (readBusy() || pending() || !saved().length) return;
     setReadBusy(true);
     setError(null);
     setNotice(null);
     try {
-      const ids = selectedIds();
+      const ids = [...saved()];
       const result = await app.runtime.readAppleCalendars(ids);
-      setSelection(null);
       const from = ids.length === 1 ? "1 calendar" : `${ids.length} calendars`;
       setNotice(result.truncated
         ? `${result.fetched} events synced from ${from}. Part of the range could not be read, so events Heiwa did not see were kept.`
         : `${result.fetched} events synced from ${from}. Heiwa keeps them current while it runs.`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(runtimeErrorMessage(cause, "Calendar events could not be synced. Your saved choices and existing events were kept. Try again."));
     } finally {
       setReadBusy(false);
     }
@@ -513,7 +537,7 @@ function CalendarSettings() {
     try {
       await app.runtime.disconnectAppleCalendar();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(runtimeErrorMessage(cause, "Apple Calendar could not be disconnected. Check its connection and try again."));
     } finally {
       setDisconnecting(false);
     }
@@ -526,7 +550,7 @@ function CalendarSettings() {
       <summary>
         <strong>Calendars</strong>
         <span class="quiet">
-          {saved().length ? `${saved().length} synced` : "Choose what to sync"}
+          {saved().length ? `${saved().length} selected` : "Choose what to sync"}
         </span>
       </summary>
       <Show
@@ -540,31 +564,33 @@ function CalendarSettings() {
           </p>
           <fieldset disabled={readBusy()}>
             <legend>Calendars to sync</legend>
-            <For each={calendars()}>
-              {(calendar) => (
+            <For each={calendarIds()}>
+              {(id) => (
                 <label class="cal-resource-choice">
                   <input
                     type="checkbox"
-                    checked={selectedIds().includes(calendar.id!)}
-                    onChange={(event) =>
-                      setSelection(event.currentTarget.checked
-                        ? [...selectedIds().filter((id) => id !== calendar.id), calendar.id!]
-                        : selectedIds().filter((id) => id !== calendar.id))}
+                    checked={selectedIds().includes(id)}
+                    onChange={(event) => choose(id, event.currentTarget.checked)}
                   />
-                  <span>{calendar.name}{calendar.source ? ` · ${calendar.source}` : ""}</span>
+                  <span>{calendarsById().get(id)!.name}{calendarsById().get(id)!.source ? ` · ${calendarsById().get(id)!.source}` : ""}</span>
                 </label>
               )}
             </For>
           </fieldset>
-          <button class="btn-primary" disabled={readBusy() || !selectedIds().length} onClick={() => void syncSelected()}>
+          <Show when={pending()?.saving}><p class="quiet" role="status">Saving calendar choices…</p></Show>
+          <Show when={pending()?.error}>
+            <p class="surface-error" role="alert"><span>Choices not saved.</span> {pending()?.error}</p>
+            <button class="small-action" onClick={() => void retrySelection()}>Retry saving choices</button>
+          </Show>
+          <button class="btn-primary" disabled={readBusy() || !!pending() || !saved().length} onClick={() => void syncSelected()}>
             {readBusy() ? "Syncing calendars…" : "Sync selected calendars"}
           </button>
         </div>
       </Show>
       <Show when={notice()}><p class="quiet" role="status">{notice()}</p></Show>
-      <Show when={error()}>{(message) => <p class="surface-error">{message()}</p>}</Show>
+      <Show when={error()}>{(message) => <p class="surface-error" role="alert">{message()}</p>}</Show>
       <div class="cal-settings-footer">
-        <button class="small-action" disabled={disconnecting() || readBusy()} onClick={() => void disconnect()}>
+        <button class="small-action" disabled={disconnecting() || readBusy() || pending()?.saving} onClick={() => void disconnect()}>
           Disconnect Apple Calendar
         </button>
       </div>
@@ -616,7 +642,7 @@ function StageEventForm() {
       setTitle("");
       setNotice("Staged locally. Review the pending decision before Apple Calendar changes.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(runtimeErrorMessage(cause, "The event could not be staged. Review pending changes before retrying."));
     } finally {
       setBusy(false);
     }
@@ -657,7 +683,7 @@ function StageEventForm() {
         </label>
       </div>
       <div class="cal-stage-actions">
-        <Show when={error()}>{(message) => <p class="surface-error">{message()}</p>}</Show>
+        <Show when={error()}>{(message) => <p class="surface-error" role="alert">{message()}</p>}</Show>
         <Show when={notice()}>{(message) => <p class="quiet">{message()}</p>}</Show>
         <Show when={notice() || (app.runtime.approvals()?.pending?.length ?? 0) > 0}>
           <button type="button" class="small-action" onClick={() => app.navigate("approvals")}>Review pending changes</button>

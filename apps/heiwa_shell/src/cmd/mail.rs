@@ -1050,9 +1050,7 @@ async fn triage(args: &[String]) -> Result<()> {
             let already = crate::cmd::approvals::requests_dir()
                 .join(format!("{request_id}.json"))
                 .exists()
-                || crate::cmd::approvals::decisions_dir()
-                    .join(format!("{request_id}.json"))
-                    .exists();
+                || crate::cmd::approvals::decision_is_verified(&request_id);
             if already {
                 skipped_existing += 1;
                 item["staged"] = json!({"request_id": request_id, "status": "already_staged"});
