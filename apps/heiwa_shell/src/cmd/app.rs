@@ -1435,8 +1435,8 @@ async fn handle_connection(
     }
     let head_only = method == "HEAD";
 
-    if is_runtime_authenticated_request(path) {
-        if let Err(error) = operator_http_auth_subject(
+    let runtime_auth_subject = if is_runtime_authenticated_request(path) {
+        match operator_http_auth_subject(
             &request,
             method,
             target,
@@ -1445,19 +1445,24 @@ async fn handle_connection(
             &local_request_replays,
             &browser_sessions,
         ) {
-            let (status, code) = operator_auth_response(error);
-            return write_response(
-                &mut stream,
-                status,
-                "application/json",
-                json!({"ok": false, "error": {"code": code}})
-                    .to_string()
-                    .into_bytes(),
-                false,
-            )
-            .await;
+            Ok(subject) => Some(subject),
+            Err(error) => {
+                let (status, code) = operator_auth_response(error);
+                return write_response(
+                    &mut stream,
+                    status,
+                    "application/json",
+                    json!({"ok": false, "error": {"code": code}})
+                        .to_string()
+                        .into_bytes(),
+                    false,
+                )
+                .await;
+            }
         }
-    }
+    } else {
+        None
+    };
 
     if is_operator_api_path(path) {
         let (status, payload) = operator_http_response(method, target, path, &body).await;
@@ -1614,15 +1619,45 @@ async fn handle_connection(
         .await;
     }
 
+    if method == "POST" && path == "/api/v1/calendar/select" {
+        let request = serde_json::from_str::<super::calendar_read::SelectRequest>(&body);
+        let result = match request {
+            Ok(request) => {
+                tokio::task::spawn_blocking(move || super::calendar_read::select_calendars(request))
+                    .await
+                    .map_err(|_| anyhow!("Calendar selection stopped unexpectedly"))
+                    .and_then(|result| result)
+            }
+            Err(_) => Err(anyhow!(
+                "Select calendars with valid calendar_ids and catalog_revision"
+            )),
+        };
+        let (status, payload) = match result {
+            Ok(data) => (200, json!({"ok":true, "data":data})),
+            Err(error) => (
+                400,
+                json!({"ok":false, "error":{"code":"calendar_selection_failed", "message":error.to_string()}}),
+            ),
+        };
+        return write_response(
+            &mut stream,
+            status,
+            "application/json",
+            payload.to_string().into_bytes(),
+            false,
+        )
+        .await;
+    }
+
     if method == "POST" && path == "/api/v1/calendar/read" {
         let request = serde_json::from_str::<super::calendar_read::ReadRequest>(&body);
         let result = match request {
-            Ok(request) => {
-                tokio::task::spawn_blocking(move || super::calendar_read::read_selected(request))
-                    .await
-                    .map_err(|_| anyhow!("Calendar reading stopped unexpectedly"))
-                    .and_then(|result| result)
-            }
+            Ok(request) => tokio::task::spawn_blocking(move || {
+                super::calendar_read::read_saved_selection(request)
+            })
+            .await
+            .map_err(|_| anyhow!("Calendar reading stopped unexpectedly"))
+            .and_then(|result| result),
             Err(_) => Err(anyhow!("Select calendars with a valid calendar_ids array")),
         };
         let (status, payload) = match result {
@@ -1741,11 +1776,30 @@ async fn handle_connection(
                     .get("note")
                     .and_then(Value::as_str)
                     .map(str::to_string);
+                let principal = runtime_auth_subject
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("operator authentication required"))
+                    .and_then(|subject| {
+                        crate::cmd::authority::Principal::runtime_request(
+                            subject,
+                            &heiwa_core::config::RuntimeConfig::from_env(),
+                            header_value(&request, "x-heiwa-client").as_deref(),
+                        )
+                    });
+                let principal = match principal {
+                    Ok(principal) => principal,
+                    Err(_) => {
+                        return write_response(
+                            &mut stream,
+                            403,
+                            "application/json",
+                            json!({"ok":false,"error":{"code":"approval_authority_required","message":"This action requires the installation operator credential"}}).to_string().into_bytes(),
+                            false,
+                        ).await;
+                    }
+                };
                 let (status, payload) = match crate::cmd::approvals::decide_request(
-                    request_id,
-                    approve,
-                    note,
-                    "Heiwa.app",
+                    request_id, approve, note, &principal,
                 ) {
                     Ok(data) => (200, json!({"ok": true, "data": data})),
                     Err(error) => {
@@ -3400,8 +3454,14 @@ async fn events_loop(mut stream: TcpStream) -> Result<()> {
 
     loop {
         ticker.tick().await;
-        let pending = scan_dispatch_ids("requests");
-        let decided = scan_dispatch_ids("approvals/decisions");
+        let dispatch = crate::home::heiwa_state_dir().join("dispatch");
+        let decided = crate::cmd::approvals::scan_verified_decision_ids_in(
+            &dispatch.join("approvals").join("decisions"),
+        );
+        let pending = scan_dispatch_ids_in(&dispatch.join("requests"))
+            .difference(&decided)
+            .cloned()
+            .collect::<HashSet<_>>();
         let goals_fp = scan_goals_fingerprint();
         let ts = chrono::Utc::now().to_rfc3339();
 
@@ -3514,11 +3574,6 @@ fn scan_goals_fingerprint() -> HashSet<(String, u64)> {
         out.insert((stem.to_string(), mtime));
     }
     out
-}
-
-fn scan_dispatch_ids(subdir: &str) -> HashSet<String> {
-    let dir = crate::home::heiwa_state_dir().join("dispatch").join(subdir);
-    scan_dispatch_ids_in(&dir)
 }
 
 fn scan_dispatch_ids_in(dir: &Path) -> HashSet<String> {
@@ -5963,34 +6018,29 @@ fn workers_summary(state_dir: &Path) -> Value {
 }
 
 fn approvals_summary(state_dir: &Path) -> Value {
+    let key = crate::cmd::authority::DecisionKey::load_default().ok();
+    approvals_summary_with_key(state_dir, key.as_ref())
+}
+
+fn approvals_summary_with_key(
+    state_dir: &Path,
+    key: Option<&crate::cmd::authority::DecisionKey>,
+) -> Value {
     let requests = state_dir.join("dispatch").join("requests");
     let decisions = state_dir
         .join("dispatch")
         .join("approvals")
         .join("decisions");
-    let pending =
-        crate::cmd::approvals::scan_pending_requests_in(&requests, &decisions).len() as i64;
-    let decided = count_json(&decisions);
+    let verified = crate::cmd::approvals::scan_verified_decision_ids_with_key(&decisions, key);
+    let pending = scan_dispatch_ids_in(&requests)
+        .difference(&verified)
+        .count();
     json!({
         "requests_dir": requests.display().to_string(),
         "decisions_dir": decisions.display().to_string(),
         "pending": pending,
-        "decided": decided,
+        "decided": verified.len(),
     })
-}
-
-fn count_json(dir: &Path) -> i64 {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return 0;
-    };
-    let mut count = 0;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("json") {
-            count += 1;
-        }
-    }
-    count
 }
 
 fn mail_summary() -> Value {
@@ -7274,20 +7324,24 @@ mod app_readmodel_tests {
             json!({"request_id":"req_completed"}).to_string(),
         )
         .expect("write approval request");
-        fs::write(
-            decisions.join("req_completed.json"),
-            json!({"id":"req_completed","outcome":"approved"}).to_string(),
-        )
-        .expect("write approval decision");
+        let (_credential_root, key) = crate::cmd::authority::tests::keyed_root();
+        let mut record = json!({"id":"req_completed","outcome":"approved"});
+        // Historical records remain pending and are never counted as decisions.
+        fs::write(decisions.join("req_completed.json"), record.to_string()).unwrap();
+        let unverified = approvals_summary_with_key(&state, Some(&key));
+        assert_eq!(unverified["pending"], 1);
+        assert_eq!(unverified["decided"], 0);
+        crate::cmd::authority::seal(&key, &mut record).unwrap();
+        fs::write(decisions.join("req_completed.json"), record.to_string()).unwrap();
 
-        let summary = approvals_summary(&state);
+        let summary = approvals_summary_with_key(&state, Some(&key));
 
         assert_eq!(summary["pending"], 0);
         assert_eq!(summary["decided"], 1);
 
         fs::remove_file(decisions.join("req_completed.json"))
             .expect("remove decision to expose pending request");
-        assert_eq!(approvals_summary(&state)["pending"], 1);
+        assert_eq!(approvals_summary_with_key(&state, Some(&key))["pending"], 1);
         let _ = fs::remove_dir_all(&state);
     }
 

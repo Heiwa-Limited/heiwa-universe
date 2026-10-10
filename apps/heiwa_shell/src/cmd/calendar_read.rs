@@ -9,6 +9,7 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -26,11 +27,31 @@ const MAX_SCAN_PAGES: usize = 12;
 const DEFAULT_SYNC_MAX_AGE_SECONDS: u64 = 120;
 /// Least wait before a sync relaunches a reader that just failed.
 const FAILED_SYNC_BACKOFF_SECONDS: i64 = 60;
+const MAX_CATALOG_RESOURCES: usize = 1000;
+const MAX_CATALOG_BYTES: u64 = 4 * 1024 * 1024;
+const CATALOG_MAX_AGE_SECONDS: i64 = 300;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadRequest {
     pub calendar_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SelectRequest {
+    pub calendar_ids: Vec<String>,
+    pub catalog_revision: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResourceCatalog {
+    schema_version: u32,
+    connected_at: String,
+    observed_at: DateTime<Utc>,
+    revision: String,
+    calendars: Vec<Value>,
 }
 
 #[derive(Default, Deserialize)]
@@ -52,6 +73,8 @@ struct SyncState {
     complete: Option<bool>,
     fetched: Option<usize>,
     error: Option<String>,
+    #[serde(default)]
+    calendar_ids: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -79,8 +102,13 @@ fn load_sync_state(state: &Path) -> SyncState {
         .unwrap_or_default()
 }
 
-fn record_sync_outcome(state: &Path, attempted_at: DateTime<Utc>, outcome: &Result<Value>) {
-    let previous = load_sync_state(state);
+fn record_sync_outcome(
+    state: &Path,
+    attempted_at: DateTime<Utc>,
+    outcome: &Result<Value>,
+    ids: &[String],
+) {
+    let previous = sync_state_for_selection(state, ids);
     let next = match outcome {
         Ok(receipt) => SyncState {
             schema_version: 1,
@@ -89,11 +117,14 @@ fn record_sync_outcome(state: &Path, attempted_at: DateTime<Utc>, outcome: &Resu
             complete: receipt["complete"].as_bool(),
             fetched: receipt["fetched"].as_u64().map(|count| count as usize),
             error: None,
+            calendar_ids: serde_json::from_value(receipt["calendar_ids"].clone())
+                .unwrap_or_default(),
         },
         Err(error) => SyncState {
             schema_version: 1,
             last_attempt_at: Some(attempted_at),
             error: Some(error.to_string()),
+            calendar_ids: ids.to_vec(),
             ..previous
         },
     };
@@ -154,7 +185,7 @@ pub(crate) fn sync_status() -> Value {
     if ids.is_empty() {
         return json!({"status": "no_selection", "selected_count": 0});
     }
-    let saved = load_sync_state(&super::calendar::calendar_state_dir());
+    let saved = sync_state_for_selection(&super::calendar::calendar_state_dir(), &ids);
     let status = if saved.error.is_some() && saved.last_attempt_at >= saved.last_read_at {
         "error"
     } else if saved.last_read_at.is_some() {
@@ -172,20 +203,22 @@ pub(crate) fn sync_selected(request: SyncRequest) -> Result<Value> {
     if super::connectors::require_apple_calendar_connection().is_err() {
         return Ok(json!({"status": "not_connected"}));
     }
+    let state = super::calendar::calendar_state_dir();
+    fs::create_dir_all(&state)?;
+    let _lock = snapshot_lock(&state.join("events.jsonl"))?;
+    // Selection, read and disconnect share this lock. A queued sync must use
+    // the selection current when it acquires the lock, not a previous tick.
     let ids = selected_ids()?;
     if ids.is_empty() {
         return Ok(json!({"status": "no_selection", "selected_count": 0}));
     }
-    let state = super::calendar::calendar_state_dir();
-    fs::create_dir_all(&state)?;
-    let _lock = snapshot_lock(&state.join("events.jsonl"))?;
     let max_age = Duration::seconds(
         request
             .max_age_seconds
             .unwrap_or(DEFAULT_SYNC_MAX_AGE_SECONDS)
             .min(86_400) as i64,
     );
-    let saved = load_sync_state(&state);
+    let saved = sync_state_for_selection(&state, &ids);
     match sync_decision(&saved, Utc::now(), max_age, request.force) {
         SyncDecision::Fresh => return Ok(status_payload("fresh", &saved, ids.len())),
         SyncDecision::BackOff => return Ok(status_payload("error", &saved, ids.len())),
@@ -204,6 +237,121 @@ pub(crate) fn selected_ids() -> Result<Vec<String>> {
     load_selection(&selection_path(), "calendar_ids", "calendar")
 }
 
+fn sync_state_for_selection(state: &Path, ids: &[String]) -> SyncState {
+    let saved = load_sync_state(state);
+    if saved.calendar_ids.iter().collect::<HashSet<_>>() == ids.iter().collect::<HashSet<_>>() {
+        saved
+    } else {
+        SyncState::default()
+    }
+}
+
+fn catalog_path(state: &Path) -> PathBuf {
+    state.join("apple_catalog.json")
+}
+
+fn enrollment_time() -> Result<String> {
+    super::connectors::require_apple_calendar_connection()?;
+    super::connectors::apple_calendar_connection_payload()["connected_at"]
+        .as_str()
+        .map(str::to_owned)
+        .context("Calendar enrollment has no connection identity")
+}
+
+fn cache_catalog(state: &Path, calendars: Vec<Value>, connected_at: String) -> Result<()> {
+    let mut identities: Vec<&str> = calendars
+        .iter()
+        .filter_map(|calendar| calendar["id"].as_str())
+        .collect();
+    identities.sort_unstable();
+    let revision = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&json!([connected_at, identities]))?)
+    );
+    let catalog = ResourceCatalog {
+        schema_version: 1,
+        connected_at,
+        observed_at: Utc::now(),
+        revision,
+        calendars,
+    };
+    let bytes = serde_json::to_vec(&catalog)?;
+    if bytes.len() as u64 > MAX_CATALOG_BYTES {
+        bail!("Calendar resource catalog exceeds its storage bound");
+    }
+    atomic_write(&catalog_path(state), &bytes)
+}
+
+fn load_catalog(state: &Path, connected_at: &str, now: DateTime<Utc>) -> Result<ResourceCatalog> {
+    let path = catalog_path(state);
+    if fs::metadata(&path)?.len() > MAX_CATALOG_BYTES {
+        bail!("Calendar resource catalog exceeds its read bound");
+    }
+    let catalog: ResourceCatalog = serde_json::from_slice(&fs::read(path)?)?;
+    validate_resources(&catalog.calendars)?;
+    if catalog.schema_version != 1
+        || catalog.connected_at != connected_at
+        || catalog.observed_at > now + Duration::seconds(60)
+        || now - catalog.observed_at > Duration::seconds(CATALOG_MAX_AGE_SECONDS)
+    {
+        bail!("Calendar resource catalog is stale; refresh the calendar list and retry");
+    }
+    Ok(catalog)
+}
+
+/// The last successful bounded inventory; exposing its revision performs no
+/// EventKit read. A disconnected or never-listed profile has no catalog.
+pub(crate) fn selection_catalog_revision() -> Result<Option<String>> {
+    let state = super::calendar::calendar_state_dir();
+    if !catalog_path(&state).exists() {
+        return Ok(None);
+    }
+    Ok(Some(
+        load_catalog(&state, &enrollment_time()?, Utc::now())?.revision,
+    ))
+}
+
+/// Save an explicit local choice independently of event importing. Empty
+/// choices disable future syncs; they never mean every calendar.
+pub(crate) fn select_calendars(request: SelectRequest) -> Result<Value> {
+    super::connectors::require_apple_calendar_connection()?;
+    let state = super::calendar::calendar_state_dir();
+    fs::create_dir_all(&state)?;
+    let _lock = snapshot_lock(&state.join("events.jsonl"))?;
+    save_selection_locked(&state, request, &enrollment_time()?, Utc::now())
+}
+
+fn save_selection_locked(
+    state: &Path,
+    request: SelectRequest,
+    connected_at: &str,
+    now: DateTime<Utc>,
+) -> Result<Value> {
+    validate_selection_ids(&request.calendar_ids)?;
+    let catalog = load_catalog(state, connected_at, now)
+        .context("Refresh the calendar list before saving choices")?;
+    if request.catalog_revision != catalog.revision {
+        bail!("Calendar resource catalog changed; refresh the calendar list and retry");
+    }
+    let known: HashSet<_> = catalog
+        .calendars
+        .iter()
+        .filter_map(|calendar| calendar["id"].as_str())
+        .collect();
+    if request
+        .calendar_ids
+        .iter()
+        .any(|id| !known.contains(id.as_str()))
+    {
+        bail!("A selected calendar is no longer in the resource catalog; refresh and retry");
+    }
+    let selection = state.join("apple_selection.json");
+    // A newer or damaged selection belongs to recovery, not silent replacement.
+    let _previous = load_selection(&selection, "calendar_ids", "calendar")?;
+    store_selection(&selection, "calendar_ids", &request.calendar_ids)?;
+    Ok(json!({"selected_ids":request.calendar_ids,"catalog_revision":catalog.revision}))
+}
+
 fn call(request: &Value) -> Result<Value> {
     let value = helper_request(
         AppleResource::Calendar,
@@ -220,15 +368,38 @@ fn call(request: &Value) -> Result<Value> {
 }
 
 pub(crate) fn resources(request_access: bool) -> Result<Vec<Value>> {
-    let result = call(&json!({"operation":"list", "request_access": request_access}))?;
-    let resources = result["calendars"]
-        .as_array()
-        .context("invalid calendar resource list")?;
+    let outcome = (|| {
+        let result = call(&json!({"operation":"list", "request_access": request_access}))?;
+        let resources = result["calendars"]
+            .as_array()
+            .context("invalid calendar resource list")?;
+        validate_resources(resources)?;
+        Ok(resources.clone())
+    })();
+    if !request_access {
+        let state = super::calendar::calendar_state_dir();
+        fs::create_dir_all(&state)?;
+        let _lock = snapshot_lock(&state.join("events.jsonl"))?;
+        match (&outcome, enrollment_time()) {
+            (Ok(calendars), Ok(connected_at)) => {
+                cache_catalog(&state, calendars.clone(), connected_at)?
+            }
+            _ if catalog_path(&state).exists() => fs::remove_file(catalog_path(&state))?,
+            _ => {}
+        }
+    }
+    outcome
+}
+
+fn validate_resources(resources: &[Value]) -> Result<()> {
+    if resources.len() > MAX_CATALOG_RESOURCES {
+        bail!("Calendar resource catalog exceeds its resource bound");
+    }
     let mut ids = HashSet::new();
     for resource in resources {
         let id = resource["id"]
             .as_str()
-            .filter(|id| !id.is_empty())
+            .filter(|id| valid_id(id))
             .context("missing calendar identity")?;
         if !ids.insert(id)
             || resource["name"].as_str().is_none()
@@ -237,10 +408,20 @@ pub(crate) fn resources(request_access: bool) -> Result<Vec<Value>> {
             bail!("Invalid calendar resource identity");
         }
     }
-    Ok(resources.clone())
+    Ok(())
 }
 
 pub(crate) fn read_selected(request: ReadRequest) -> Result<Value> {
+    read_selection(request, false)
+}
+
+/// HTTP importing uses only choices the client already acknowledged. A later
+/// save by another client must not be rolled back by a queued, older read.
+pub(crate) fn read_saved_selection(request: ReadRequest) -> Result<Value> {
+    read_selection(request, true)
+}
+
+fn read_selection(request: ReadRequest, require_saved: bool) -> Result<Value> {
     let state = super::calendar::calendar_state_dir();
     fs::create_dir_all(&state)?;
     let _lock = snapshot_lock(&state.join("events.jsonl"))?;
@@ -249,16 +430,29 @@ pub(crate) fn read_selected(request: ReadRequest) -> Result<Value> {
     // hold the next background sync in backoff.
     super::connectors::require_apple_calendar_connection()?;
     validate_selection(&request.calendar_ids)?;
+    if require_saved && request.calendar_ids != selected_ids()? {
+        bail!("Calendar choices changed; refresh the saved selection before syncing events");
+    }
     read_and_record(&state, request.calendar_ids)
 }
 
 fn validate_selection(ids: &[String]) -> Result<()> {
-    if ids.is_empty()
-        || ids.len() > 100
-        || ids.iter().any(|id| id.is_empty() || id.len() > 1024)
+    if ids.is_empty() {
+        bail!("Select between 1 and 100 distinct calendars");
+    }
+    validate_selection_ids(ids)
+}
+
+fn valid_id(id: &str) -> bool {
+    !id.trim().is_empty() && id.len() <= 1024 && !id.chars().any(char::is_control)
+}
+
+fn validate_selection_ids(ids: &[String]) -> Result<()> {
+    if ids.len() > 100
+        || ids.iter().any(|id| !valid_id(id))
         || ids.iter().collect::<HashSet<_>>().len() != ids.len()
     {
-        bail!("Select between 1 and 100 distinct calendars");
+        bail!("Select at most 100 distinct calendars with valid identities");
     }
     Ok(())
 }
@@ -266,8 +460,8 @@ fn validate_selection(ids: &[String]) -> Result<()> {
 /// Read under the caller's snapshot lock and remember the outcome.
 fn read_and_record(state: &Path, ids: Vec<String>) -> Result<Value> {
     let attempted_at = Utc::now();
-    let outcome = read_locked(state, ids);
-    record_sync_outcome(state, attempted_at, &outcome);
+    let outcome = read_locked(state, ids.clone());
+    record_sync_outcome(state, attempted_at, &outcome, &ids);
     outcome
 }
 
@@ -497,6 +691,220 @@ pub(super) fn serialize_rows(rows: &[Value]) -> Vec<u8> {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    fn selection_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        cache_catalog(
+            dir.path(),
+            vec![
+                json!({"id":"work","name":"Work","writable":true}),
+                json!({"id":"life","name":"Life","writable":true}),
+            ],
+            "connected-1".into(),
+        )
+        .unwrap();
+        store_selection(
+            &dir.path().join("apple_selection.json"),
+            "calendar_ids",
+            &["work".into()],
+        )
+        .unwrap();
+        dir
+    }
+
+    fn save_choices(state: &Path, ids: Vec<String>) -> Result<Value> {
+        let catalog = load_catalog(state, "connected-1", Utc::now())?;
+        save_selection_locked(
+            state,
+            SelectRequest {
+                calendar_ids: ids,
+                catalog_revision: catalog.revision,
+            },
+            "connected-1",
+            Utc::now(),
+        )
+    }
+
+    #[test]
+    fn choices_persist_without_importing_and_empty_disables_future_reads() {
+        let dir = selection_fixture();
+        let snapshot = dir.path().join("events.jsonl");
+        fs::write(&snapshot, "old event evidence\n").unwrap();
+        let receipt = save_choices(dir.path(), vec!["life".into(), "work".into()]).unwrap();
+        assert_eq!(receipt["selected_ids"], json!(["life", "work"]));
+        assert_eq!(
+            load_selection(
+                &dir.path().join("apple_selection.json"),
+                "calendar_ids",
+                "calendar"
+            )
+            .unwrap(),
+            ["life", "work"]
+        );
+        assert_eq!(
+            fs::read_to_string(&snapshot).unwrap(),
+            "old event evidence\n"
+        );
+        assert!(!dir.path().join("receipts").exists());
+        save_choices(dir.path(), vec![]).unwrap();
+        assert!(load_selection(
+            &dir.path().join("apple_selection.json"),
+            "calendar_ids",
+            "calendar"
+        )
+        .unwrap()
+        .is_empty());
+        assert!(
+            validate_selection(&[]).is_err(),
+            "reading with no selection must never mean everything"
+        );
+    }
+
+    #[test]
+    fn invalid_or_unknown_choices_preserve_the_prior_selection() {
+        let dir = selection_fixture();
+        let path = dir.path().join("apple_selection.json");
+        let before = fs::read(&path).unwrap();
+        for ids in [
+            vec!["unknown".into()],
+            vec!["work".into(), "work".into()],
+            vec!["".into()],
+            vec![" ".into()],
+            vec!["work\0".into()],
+            vec!["x".repeat(1025)],
+            (0..101).map(|id| format!("{id}")).collect(),
+        ] {
+            assert!(save_choices(dir.path(), ids).is_err());
+            assert_eq!(fs::read(&path).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn replaced_expired_or_previous_enrollment_catalogs_preserve_choices() {
+        let dir = selection_fixture();
+        let path = dir.path().join("apple_selection.json");
+        let before = fs::read(&path).unwrap();
+        let old_revision = load_catalog(dir.path(), "connected-1", Utc::now())
+            .unwrap()
+            .revision;
+        cache_catalog(
+            dir.path(),
+            vec![json!({"id":"life","name":"Life","writable":true})],
+            "connected-1".into(),
+        )
+        .unwrap();
+        assert!(save_selection_locked(
+            dir.path(),
+            SelectRequest {
+                calendar_ids: vec!["life".into()],
+                catalog_revision: old_revision
+            },
+            "connected-1",
+            Utc::now()
+        )
+        .is_err());
+        let catalog = load_catalog(dir.path(), "connected-1", Utc::now()).unwrap();
+        assert!(save_selection_locked(
+            dir.path(),
+            SelectRequest {
+                calendar_ids: vec!["life".into()],
+                catalog_revision: catalog.revision.clone()
+            },
+            "connected-2",
+            Utc::now()
+        )
+        .is_err());
+        assert!(save_selection_locked(
+            dir.path(),
+            SelectRequest {
+                calendar_ids: vec![],
+                catalog_revision: catalog.revision
+            },
+            "connected-1",
+            Utc::now() + Duration::seconds(301)
+        )
+        .is_err());
+        assert_eq!(fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn malformed_catalog_or_selection_is_not_silently_overwritten() {
+        let dir = selection_fixture();
+        let path = dir.path().join("apple_selection.json");
+        let before = fs::read(&path).unwrap();
+        fs::write(catalog_path(dir.path()), "{}").unwrap();
+        assert!(save_choices(dir.path(), vec!["work".into()]).is_err());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        cache_catalog(
+            dir.path(),
+            vec![json!({"id":"work","name":"Work","writable":true})],
+            "connected-1".into(),
+        )
+        .unwrap();
+        fs::write(&path, r#"{"schema_version":2,"calendar_ids":["work"]}"#).unwrap();
+        let future = fs::read(&path).unwrap();
+        assert!(save_choices(dir.path(), vec!["work".into()]).is_err());
+        assert_eq!(fs::read(&path).unwrap(), future);
+    }
+
+    #[test]
+    fn catalog_bounds_and_identity_validation_refuse_incomplete_projections() {
+        assert!(validate_resources(&vec![
+            json!({"id":"work","name":"Work","writable":true});
+            MAX_CATALOG_RESOURCES + 1
+        ])
+        .is_err());
+        assert!(validate_resources(&[
+            json!({"id":"work","name":"Work","writable":true}),
+            json!({"id":"work","name":"Another","writable":true})
+        ])
+        .is_err());
+        assert!(validate_resources(&[json!({"id":"work","name":"Work"})]).is_err());
+        let dir = selection_fixture();
+        fs::write(
+            catalog_path(dir.path()),
+            vec![b' '; (MAX_CATALOG_BYTES + 1) as usize],
+        )
+        .unwrap();
+        assert!(load_catalog(dir.path(), "connected-1", Utc::now()).is_err());
+    }
+
+    #[test]
+    fn changed_selection_does_not_borrow_freshness_or_backoff_from_old_calendars() {
+        let dir = selection_fixture();
+        let now = Utc::now();
+        let successful = Ok(json!({"calendar_ids":["work"],"complete":true,"fetched":3}));
+        record_sync_outcome(dir.path(), now, &successful, &["work".into()]);
+        assert!(sync_state_for_selection(dir.path(), &["work".into()])
+            .last_read_at
+            .is_some());
+        assert!(sync_state_for_selection(dir.path(), &["life".into()])
+            .last_read_at
+            .is_none());
+        record_sync_outcome(
+            dir.path(),
+            now,
+            &Err(anyhow::anyhow!("Reader unavailable")),
+            &["life".into()],
+        );
+        let saved = sync_state_for_selection(dir.path(), &["life".into()]);
+        assert!(saved.last_read_at.is_none());
+        assert_eq!(
+            sync_decision(&saved, now, Duration::seconds(120), false),
+            SyncDecision::BackOff
+        );
+    }
+
+    #[test]
+    fn selection_request_rejects_unexpected_fields_and_nonstring_ids() {
+        for value in [
+            json!({"calendar_ids":["work"],"catalog_revision":"a","read":true}),
+            json!({"calendar_ids":[null],"catalog_revision":"a"}),
+            json!({"calendar_ids":["work"]}),
+        ] {
+            assert!(serde_json::from_value::<SelectRequest>(value).is_err());
+        }
+    }
 
     fn at(raw: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(raw)

@@ -10,17 +10,18 @@ use tokio::sync::mpsc;
 ///
 /// Wraps `gemini -p <prompt> --output-format stream-json --model <model>`.
 /// This adapter is for users who have Gemini CLI installed and authenticated.
-pub struct GeminiCliAdapter;
-
-impl Default for GeminiCliAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct GeminiCliAdapter {
+    binary: String,
 }
 
 impl GeminiCliAdapter {
-    pub fn new() -> Self {
-        Self
+    pub(crate) fn from_admitted_lane(lane: &crate::admission::RegistryAdmittedLane) -> Self {
+        let crate::Credential::OauthCli { binary } = &lane.account().credential else {
+            unreachable!("admission validates CLI credential kind");
+        };
+        Self {
+            binary: binary.clone(),
+        }
     }
 }
 
@@ -38,7 +39,7 @@ impl ProviderAdapter for GeminiCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut cmd = Command::new(crate::resolve_command_or_name("gemini"));
+        let mut cmd = Command::new(crate::resolve_command_or_name(&self.binary));
         crate::adapter::configure_cli_command(&mut cmd);
         cmd.arg("-p")
             .arg(&prompt)

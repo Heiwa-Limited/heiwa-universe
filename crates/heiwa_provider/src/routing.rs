@@ -1,16 +1,9 @@
-//! Adapter selection: which of a user's accounts serves a given provider.
-//!
-//! Selection lives with the adapters rather than in the shell binary so
-//! every surface — CLI, desktop runtime, tests — resolves a provider the
-//! same way, and so the fresh-install path is reachable from an integration
-//! test.
-//!
-//! The rule is: a user's own API key takes the route when they have a
-//! healthy one, and the CLI adapter is the fallback. Both stay available —
-//! a subscription seat carries the provider's own auth, quota, and session
-//! behavior, and a key works on a machine where no CLI is installed.
+//! Registry-backed, callers-first admission and witness-bound adapter factory.
+//! No implicit CLI/local fallback exists. This transitional stage does not
+//! establish fresh inference proof; all witnesses name LegacyCurrentTruth.
 
-use crate::adapter::ProviderAdapter;
+use crate::adapter::{Message, ProviderAdapter, StreamEvent};
+use crate::admission::{admit_registry_lane, ProviderAdmissionDenial, RegistryAdmittedLane};
 use crate::health::AccountHealth;
 use crate::providers::{
     anthropic_api::AnthropicApiAdapter, claude_code::ClaudeCodeCliAdapter,
@@ -18,7 +11,9 @@ use crate::providers::{
     ollama::OllamaCliAdapter, openai_api::OpenAiApiAdapter, openrouter::OpenRouterAdapter,
 };
 use crate::registry::{AccountRegistry, Credential, ProviderAccount};
+use async_trait::async_trait;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 /// DREX provider ids this crate can serve.
 pub const SUPPORTED_PROVIDERS: &[&str] = &["ollama", "claude", "codex", "gemini", "openrouter"];
@@ -66,56 +61,35 @@ pub fn routable_api_key_account(
     routable_api_key_account_for(registry, drex_provider, "")
 }
 
-/// Pick the account that can actually serve `model_id`.
-///
-/// A user may hold several keys for one vendor with different inventories —
-/// a work seat and a personal seat, or a key whose org has no Opus access.
-/// Taking the first routable account sends the turn to a seat that may not
-/// serve the routed model. An account that lists the model wins; otherwise
-/// any healthy account does, because an empty inventory means "not probed",
-/// not "cannot serve".
+/// Pick an exact verified API inventory entry. Empty requests support passive
+/// account queries only; adapter resolution always requires a named model.
 pub fn routable_api_key_account_for(
     registry: &AccountRegistry,
     drex_provider: &str,
     model_id: &str,
 ) -> Option<ProviderAccount> {
-    let registry_provider = registry_provider_for(drex_provider)?;
-    let candidates: Vec<&ProviderAccount> = registry
+    let provider = registry_provider_for(drex_provider)?;
+    registry
         .accounts
         .iter()
-        .filter(|account| {
-            account.provider == registry_provider
+        .find(|account| {
+            canonical_provider_id(&account.provider) == canonical_provider_id(provider)
                 && matches!(account.credential, Credential::ApiKey)
                 && AccountHealth::project(account).routable
+                && account.models.iter().any(|model| {
+                    crate::admission::model_is_admissible(account, model)
+                        && admit_registry_lane(
+                            registry,
+                            &account.account_id,
+                            &model.provider_model_id,
+                        )
+                        .is_ok()
+                        && (model_id.is_empty()
+                            || model.provider_model_id == model_id
+                            || model.model_id == model_id)
+                })
         })
-        .collect();
-
-    if let Some(serving) = candidates.iter().find(|account| {
-        account
-            .models
-            .iter()
-            .any(|model| model.provider_model_id == model_id || model.model_id == model_id)
-    }) {
-        return Some((*serving).clone());
-    }
-
-    // No API-key account lists this model. If some *other* account does — a
-    // subscription seat, say — that account owns the model, and falling back
-    // to a metered key would move the charge to the user's card while quota
-    // still debits the seat. Only fall back when nothing claims the model.
-    let claimed_elsewhere = !model_id.is_empty()
-        && registry.accounts.iter().any(|account| {
-            !matches!(account.credential, Credential::ApiKey)
-                && account
-                    .models
-                    .iter()
-                    .any(|model| model.provider_model_id == model_id || model.model_id == model_id)
-        });
-    if claimed_elsewhere {
-        return None;
-    }
-
-    candidates.first().map(|account| (*account).clone())
+        .cloned()
 }
 
 /// Environment variable that retargets a provider's API base URL.
@@ -151,73 +125,196 @@ fn env_base_url(canonical_provider: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Resolve an adapter for a provider using the user's own registry.
+/// Resolve an explicit model using the current registry. Unknown/unavailable
+/// accounts return actionable denial before any subprocess or credential read.
 pub fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAdapter>, String> {
-    resolve_adapter_with(&AccountRegistry::load(), provider, model_id, None)
+    let registry = AccountRegistry::load_strict().map_err(|_| {
+        "Provider account configuration could not be read; inspect heiwa doctor".to_string()
+    })?;
+    resolve_adapter_from_registry(&registry, provider, model_id, None, true)
 }
 
-/// Resolve against an explicit registry.
-///
-/// `base_url_override` retargets direct-API adapters, which is how the
-/// fresh-install harness points them at a loopback mock without the
-/// adapters knowing they are under test.
 pub fn resolve_adapter_with(
     registry: &AccountRegistry,
     provider: &str,
     model_id: &str,
     base_url_override: Option<&str>,
 ) -> Result<Arc<dyn ProviderAdapter>, String> {
-    if let Some(account) = routable_api_key_account_for(registry, provider, model_id) {
-        let models: Vec<String> = account
-            .models
-            .iter()
-            .map(|model| model.provider_model_id.clone())
-            .collect();
-        let account_id = account.account_id.clone();
+    resolve_adapter_from_registry(registry, provider, model_id, base_url_override, false)
+}
 
-        let canonical = canonical_provider_id(provider);
-        let from_env = env_base_url(canonical);
-        let override_url = base_url_override.map(str::to_string).or(from_env);
-        let base_url_override = override_url.as_deref();
-
-        match canonical {
-            "claude" => {
-                let base =
-                    base_url_override.unwrap_or(crate::providers::anthropic_api::DEFAULT_BASE_URL);
-                return Ok(Arc::new(
-                    AnthropicApiAdapter::new(account_id, base).with_models(models),
-                ));
+fn resolve_adapter_from_registry(
+    registry: &AccountRegistry,
+    provider: &str,
+    model_id: &str,
+    base_url_override: Option<&str>,
+    current_registry: bool,
+) -> Result<Arc<dyn ProviderAdapter>, String> {
+    let vendor = registry_provider_for(provider)
+        .ok_or_else(|| ProviderAdmissionDenial::UnsupportedProvider.to_string())?;
+    if model_id.trim().is_empty() {
+        return Err(ProviderAdmissionDenial::ModelUnavailable.to_string());
+    }
+    // A key wins only when THIS account admits THIS model. A CLI seat does
+    // not lend inventory to a key, and neither invents a default model.
+    let mut accounts: Vec<_> = registry
+        .accounts
+        .iter()
+        .filter(|a| canonical_provider_id(&a.provider) == canonical_provider_id(vendor))
+        .collect();
+    accounts.sort_by_key(|a| !matches!(a.credential, Credential::ApiKey));
+    let mut denial = ProviderAdmissionDenial::AccountMissing;
+    for account in accounts {
+        match admit_registry_lane(registry, &account.account_id, model_id) {
+            Ok(lane) => {
+                return resolve_admitted_adapter_with(
+                    Arc::new(lane),
+                    base_url_override,
+                    current_registry,
+                )
+                .map_err(|e| e.to_string())
             }
-            "codex" => {
-                let base =
-                    base_url_override.unwrap_or(crate::providers::openai_api::DEFAULT_BASE_URL);
-                return Ok(Arc::new(
-                    OpenAiApiAdapter::new(account_id, base).with_models(models),
-                ));
-            }
-            "gemini" => {
-                let base =
-                    base_url_override.unwrap_or(crate::providers::gemini_api::DEFAULT_BASE_URL);
-                return Ok(Arc::new(
-                    GeminiApiAdapter::new(account_id, base).with_models(models),
-                ));
-            }
-            _ => {}
+            Err(error) => denial = error,
         }
     }
+    Err(format!("{provider}: {denial}"))
+}
 
-    match canonical_provider_id(provider) {
-        "ollama" => Ok(Arc::new(OllamaCliAdapter::with_model(model_id))),
-        "claude" => Ok(Arc::new(ClaudeCodeCliAdapter::new())),
-        "codex" => Ok(Arc::new(CodexCliAdapter::new())),
-        "gemini" => Ok(Arc::new(GeminiCliAdapter::new())),
-        "openrouter" => OpenRouterAdapter::from_registry()
-            .map(|adapter| Arc::new(adapter) as Arc<dyn ProviderAdapter>)
-            .ok_or_else(|| {
-                "No OpenRouter account registered (heiwa auth add-key openrouter <key>)."
-                    .to_string()
-            }),
-        _ => Err(format!("No adapter for provider '{provider}' yet.")),
+/// Construct only from the original admission witness; no registry reload or
+/// provider-name account selection occurs inside a transport constructor.
+pub fn resolve_admitted_adapter(
+    lane: Arc<RegistryAdmittedLane>,
+) -> Result<Arc<dyn ProviderAdapter>, ProviderAdmissionDenial> {
+    resolve_admitted_adapter_with(lane, None, true)
+}
+
+fn resolve_admitted_adapter_with(
+    lane: Arc<RegistryAdmittedLane>,
+    override_url: Option<&str>,
+    current_registry: bool,
+) -> Result<Arc<dyn ProviderAdapter>, ProviderAdmissionDenial> {
+    crate::admission::admit_account(lane.account(), lane.provider_model_id(), |binary| {
+        crate::resolve_command(binary).is_some()
+    })?;
+    let base = override_url
+        .map(str::to_string)
+        .or_else(|| env_base_url(lane.provider()));
+    let transport: Arc<dyn ProviderAdapter> = match (&lane.account().credential, lane.provider()) {
+        (Credential::ApiKey, "claude") => Arc::new(AnthropicApiAdapter::from_admitted_lane(
+            &lane,
+            base.as_deref()
+                .unwrap_or(crate::providers::anthropic_api::DEFAULT_BASE_URL),
+        )),
+        (Credential::ApiKey, "codex") => Arc::new(OpenAiApiAdapter::from_admitted_lane(
+            &lane,
+            base.as_deref()
+                .unwrap_or(crate::providers::openai_api::DEFAULT_BASE_URL),
+        )),
+        (Credential::ApiKey, "gemini") => Arc::new(GeminiApiAdapter::from_admitted_lane(
+            &lane,
+            base.as_deref()
+                .unwrap_or(crate::providers::gemini_api::DEFAULT_BASE_URL),
+        )),
+        (Credential::ApiKey, "openrouter") => {
+            Arc::new(OpenRouterAdapter::from_admitted_lane(&lane))
+        }
+        (Credential::OauthCli { .. }, "claude") => {
+            Arc::new(ClaudeCodeCliAdapter::from_admitted_lane(&lane))
+        }
+        (Credential::OauthCli { .. }, "codex") => {
+            Arc::new(CodexCliAdapter::from_admitted_lane(&lane))
+        }
+        (Credential::OauthCli { .. }, "gemini") => {
+            Arc::new(GeminiCliAdapter::from_admitted_lane(&lane))
+        }
+        (Credential::LocalRuntime { .. }, "ollama") => {
+            Arc::new(OllamaCliAdapter::from_admitted_lane(&lane))
+        }
+        _ => return Err(ProviderAdmissionDenial::UnsupportedProvider),
+    };
+    Ok(Arc::new(AdmittedAdapter {
+        lane,
+        transport,
+        current_registry,
+    }))
+}
+
+struct AdmittedAdapter {
+    lane: Arc<RegistryAdmittedLane>,
+    transport: Arc<dyn ProviderAdapter>,
+    current_registry: bool,
+}
+
+#[async_trait]
+impl ProviderAdapter for AdmittedAdapter {
+    async fn send(
+        &self,
+        model: &str,
+        messages: &[Message],
+        tx: mpsc::Sender<StreamEvent>,
+    ) -> anyhow::Result<()> {
+        let current_denial = if self.current_registry {
+            match AccountRegistry::load_strict() {
+                Ok(registry) => self.lane.validate_current(&registry).err(),
+                Err(_) => Some(ProviderAdmissionDenial::AccountUnavailable),
+            }
+        } else {
+            None
+        };
+        let denial = if let Some(denial) = current_denial {
+            Some(denial)
+        } else if model != self.lane.provider_model_id() && model != self.lane.model_id() {
+            Some(ProviderAdmissionDenial::LaneMismatch)
+        } else {
+            crate::admission::admit_account(
+                self.lane.account(),
+                self.lane.provider_model_id(),
+                |binary| crate::resolve_command(binary).is_some(),
+            )
+            .err()
+        };
+        if let Some(denial) = denial {
+            let _ = tx.send(StreamEvent::Error(denial.to_string())).await;
+            return Err(denial.into());
+        }
+        self.transport
+            .send(self.lane.provider_model_id(), messages, tx)
+            .await
+    }
+    async fn interrupt(&self) -> anyhow::Result<()> {
+        self.transport.interrupt().await
+    }
+    fn supported_models(&self) -> Vec<String> {
+        vec![self.lane.provider_model_id().to_string()]
+    }
+    fn execution_channel(&self) -> crate::adapter::ExecutionChannel {
+        self.transport.execution_channel()
+    }
+}
+
+/// Stable presentation identity includes the exact account and quota group.
+/// It is never an authorization token; execution also matches the witness.
+pub fn registry_model_identity(model: &crate::DetectedModel) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        canonical_provider_id(&model.provider),
+        model.model_id,
+        model.provider_model_id,
+        model.account_id,
+        model.rate_group
+    )
+}
+
+pub fn registry_model_candidate_id(model: &crate::DetectedModel) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in registry_model_identity(model).bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    if hash == 0 {
+        1
+    } else {
+        hash
     }
 }
 
@@ -279,20 +376,9 @@ mod tests {
         );
 
         let empty = AccountRegistry::default();
-        for (provider, binary) in [
-            ("gemini", "gemini"),
-            ("claude", "claude"),
-            ("codex", "codex"),
-        ] {
-            let cli = resolve_adapter_with(&empty, provider, "m", None).unwrap();
-            assert_eq!(
-                cli.execution_channel(),
-                crate::adapter::ExecutionChannel::cli(binary)
-            );
-            assert_eq!(cli.execution_channel().kind, "oauth_cli");
+        for provider in ["gemini", "claude", "codex", "ollama"] {
+            assert!(resolve_adapter_with(&empty, provider, "m", None).is_err());
         }
-        let ollama = resolve_adapter_with(&empty, "ollama", "qwen", None).unwrap();
-        assert_eq!(ollama.execution_channel().kind, "local_runtime");
     }
 
     #[test]
@@ -350,19 +436,14 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_model_still_routes_to_a_healthy_account() {
-        // Inventory may be empty (never probed) or the caller may pass a model
-        // this crate has not seen. Refusing to route would turn a working key
-        // into a dead end.
+    fn an_unknown_model_is_denied_even_with_a_healthy_account() {
+        // A real account does not authorize an unlisted model.
         let registry = AccountRegistry::from_accounts(vec![with_models(
             named("anthropic-work", "anthropic"),
             &["claude-haiku-4-5"],
         )]);
 
-        let account = routable_api_key_account_for(&registry, "claude", "some-unlisted-model")
-            .expect("account");
-
-        assert_eq!(account.account_id, "anthropic-work");
+        assert!(routable_api_key_account_for(&registry, "claude", "some-unlisted-model").is_none());
     }
 
     #[test]
@@ -407,5 +488,112 @@ mod tests {
         assert!(is_supported("anthropic"));
         assert!(is_supported("ollama"));
         assert!(!is_supported("mystery-provider"));
+    }
+    #[test]
+    fn missing_registry_never_constructs_implicit_cli_or_local_routes() {
+        for provider in ["claude", "codex", "gemini", "ollama", "openrouter"] {
+            assert!(
+                resolve_adapter_with(&AccountRegistry::default(), provider, "unproven", None)
+                    .is_err(),
+                "{provider} bypassed admission"
+            );
+        }
+    }
+
+    #[test]
+    fn unlisted_model_never_borrows_a_working_api_account() {
+        let registry = AccountRegistry::from_accounts(vec![with_models(
+            named("anthropic-work", "anthropic"),
+            &["allowed"],
+        )]);
+        assert!(resolve_adapter_with(&registry, "claude", "unlisted", None).is_err());
+    }
+
+    #[test]
+    fn inferred_inventory_never_constructs_a_metered_adapter() {
+        let mut account = with_models(named("anthropic-work", "anthropic"), &["allowed"]);
+        account.models[0].inventory_truth = crate::registry::InventoryTruth::Inferred;
+        assert!(resolve_adapter_with(
+            &AccountRegistry::from_accounts(vec![account]),
+            "claude",
+            "allowed",
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn another_accounts_inventory_never_admits_a_lane() {
+        let mut account = with_models(named("anthropic-work", "anthropic"), &["allowed"]);
+        account.models[0].account_id = "anthropic-personal".into();
+        assert!(resolve_adapter_with(
+            &AccountRegistry::from_accounts(vec![account]),
+            "claude",
+            "allowed",
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn disconnected_cli_never_constructs_a_route() {
+        let mut account = with_models(named("anthropic-cli", "anthropic"), &["allowed"]);
+        account.credential = Credential::OauthCli {
+            binary: "claude".into(),
+        };
+        account.status = AccountStatus::Disconnected;
+        assert!(resolve_adapter_with(
+            &AccountRegistry::from_accounts(vec![account]),
+            "claude",
+            "allowed",
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn empty_model_request_does_not_select_an_implicit_provider_default() {
+        let registry = AccountRegistry::from_accounts(vec![with_models(
+            named("anthropic-work", "anthropic"),
+            &["allowed"],
+        )]);
+        assert!(resolve_adapter_with(&registry, "claude", "", None).is_err());
+    }
+
+    #[tokio::test]
+    async fn changing_the_model_after_admission_denies_before_transport_or_credential_access() {
+        struct CountingTransport(std::sync::atomic::AtomicUsize);
+        #[async_trait]
+        impl ProviderAdapter for CountingTransport {
+            async fn send(
+                &self,
+                _model: &str,
+                _messages: &[Message],
+                _tx: mpsc::Sender<StreamEvent>,
+            ) -> anyhow::Result<()> {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+            async fn interrupt(&self) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn supported_models(&self) -> Vec<String> {
+                vec![]
+            }
+        }
+        let account = with_models(named("anthropic-work", "anthropic"), &["allowed"]);
+        let registry = AccountRegistry::from_accounts(vec![account]);
+        let lane = Arc::new(admit_registry_lane(&registry, "anthropic-work", "allowed").unwrap());
+        let transport = Arc::new(CountingTransport(std::sync::atomic::AtomicUsize::new(0)));
+        let adapter = AdmittedAdapter {
+            lane,
+            transport: transport.clone(),
+            current_registry: false,
+        };
+        let (tx, mut rx) = mpsc::channel(4);
+        assert!(adapter.send("unlisted", &[], tx).await.is_err());
+        assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(matches!(rx.recv().await, Some(StreamEvent::Error(_))));
+        assert!(rx.recv().await.is_none());
     }
 }

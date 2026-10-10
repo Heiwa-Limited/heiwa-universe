@@ -395,6 +395,7 @@ This records current local development evidence, not release acceptance.
 | --- | --- | --- | --- |
 | C1-a | Authority, containment, grants, Work-scoped submission | doing | Offline fixture probe and 8 regression tests pass on macOS; whole-provider enforcement and runtime authority integration remain. See `docs/superpowers/plans/2026-09-27-engines-c1a-enforcement.md`. |
 | C1-a1 | Explicit desktop continuation of existing Work | done | 212 desktop, 9 packaging, 45 shell library, 22 operator HTTP, and 58 session-service tests pass. L0 gate passes with updated seam hashes. Rust exposes and revalidates admitted membership; old runtimes fail before submission, lost acknowledgements retain request identity, and ordinary chat remains unscoped. No automatic Work creation, engine admission, installation, or release is claimed. |
+| C1-a2 | File-bound operator decisions and verified decision consumers | doing | Core private-reader, canonical-integrity, CLI/DREX forgery, Mail staging and real HTTP authority regressions pass in development. Frozen gate, independent review and matching device proof remain. Contract: `docs/superpowers/plans/2026-09-28-engines-c1a2-decision-authority.md`. No same-user worker containment or legacy auto-migration is claimed. |
 | C1-b | Shared tools and recoverable Apple effects | pending | Reminders R1 is CLI read/propose only: separate enrollment/permission, selected lists, imported Calendar-event proposal and honest incomplete/ambiguous scans. Source/hermetic progress is not device or write acceptance. Runtime authority/containment and persisted write-result proof remain required; no Reminders write acceptance claimed. |
 | C1-c | Claude and Ollama execution families | pending | Offline Seatbelt canaries do not admit a provider engine. |
 | C1-d | Lightweight answers, allowance pools, and surfaces | pending | Bounded read-only tools remain eligible for Answer; routing not implemented here. |
@@ -404,3 +405,15 @@ This records current local development evidence, not release acceptance.
 Verification for the offline C1-a spike:
 `python3 -m unittest discover -s scripts/tests -p test_engine_enforcement_probe.py -v`
 and `python3 scripts/probe_engine_enforcement.py`.
+
+## Cohesive desktop/runtime integration — 2026-10-10
+
+This completes related development work rather than restarting a speculative
+whole-codebase refactor. Acceptance is source/development acceptance; installed
+and public release evidence remain distinct.
+
+| Slice | Plane | Status | Evidence / boundary |
+| --- | --- | --- | --- |
+| Calendar choice persistence | Intake | doing | 36 targeted UI tests, 13 service tests and 12 connector tests pass. Independent save, stable row identity, empty deselection, stale catalog/client rejection and no-helper failure regressions are covered. Frozen gate and matching bundle proof remain; no new Apple permission/content acceptance is claimed. |
+| Provider callers-first admission | Execution | doing | Private exact-account/model witness closes fallback and cross-account inventory borrowing. Production admission is rebuilt per execution before ranking. Structural gate and targeted regressions are being verified. This is LegacyCurrentTruth, not fresh inference eligibility. |
+| Project MCP configuration | Evidence | doing | Duplicate process registration is rejected by instruction-sync checks; 33 sync tests pass. Unsupported Git npm registration and duplicated Docker gateway are removed from the operator edit only through the reviewed protected configuration. Runtime GUI reload remains distinct from CLI configuration loading. |

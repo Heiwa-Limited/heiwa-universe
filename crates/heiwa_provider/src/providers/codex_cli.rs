@@ -10,17 +10,18 @@ use tokio::sync::mpsc;
 ///
 /// Wraps `codex exec --json [-m <model>] <prompt>`.
 /// For ChatGPT-Plus subscription users authenticated via `codex login`.
-pub struct CodexCliAdapter;
-
-impl Default for CodexCliAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct CodexCliAdapter {
+    binary: String,
 }
 
 impl CodexCliAdapter {
-    pub fn new() -> Self {
-        Self
+    pub(crate) fn from_admitted_lane(lane: &crate::admission::RegistryAdmittedLane) -> Self {
+        let crate::Credential::OauthCli { binary } = &lane.account().credential else {
+            unreachable!("admission validates CLI credential kind");
+        };
+        Self {
+            binary: binary.clone(),
+        }
     }
 }
 
@@ -38,7 +39,7 @@ impl ProviderAdapter for CodexCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut cmd = Command::new(crate::resolve_command_or_name("codex"));
+        let mut cmd = Command::new(crate::resolve_command_or_name(&self.binary));
         crate::adapter::configure_cli_command(&mut cmd);
         cmd.arg("exec")
             .arg("--json")

@@ -54,6 +54,24 @@ The migration is deliberately split:
 
 The witness and its structural repository gate ship in the same commit.
 
+### Implemented callers-first boundary (2026-10-10)
+
+`RegistryAdmittedLane` is the transitional `LegacyCurrentTruth` witness. Its
+private fields bind one configured account, provider model and quota group.
+Production model execution builds admitted candidates before ranking and keeps
+the selected witness for that execution's factory. A changed account or model
+configuration denies execution; provider-name resolution cannot borrow another
+account's inventory. Concrete adapter construction is private to the provider
+crate and requires that witness. A structural gate and mutation regressions
+protect the production constructor path.
+
+This stage removes unconditional CLI/local fallback and inferred cloud-model
+admission. Explicit local-runtime model configuration remains supported. It does
+not establish fresh inference proof, CLI sign-in, entitlement, allowance or the
+four-conjunct observation-based snapshot. Historical `provider_executions` remain
+separate evidence and never silently change routing. Observation projection and
+explicit provider-owned metadata/proving commands remain subsequent work.
+
 ## Authority Split
 
 Provider-owned apps and provider adapters occupy different authority domains.

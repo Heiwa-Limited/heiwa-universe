@@ -129,6 +129,80 @@ describe("RuntimeState calendar", () => {
   });
 });
 
+describe("Calendar selection acknowledgements", () => {
+  const resources = { source: "apple_calendar", status: "ready", catalog_revision: "catalog-1", selected_ids: ["work"],
+    calendars: ["work", "life", "family"].map((id) => ({ id, name: id, writable: true })) };
+
+  it("serializes rapid toggles, coalesces the next intent and does not roll it back with the first acknowledgement", async () => {
+    const answers: Array<(value: unknown) => void> = [];
+    const post = vi.fn(() => new Promise((resolve) => { answers.push(resolve); }));
+    const state = createRuntimeState({ get: vi.fn().mockResolvedValue({ data: resources }), post: post as never });
+    await state.loadCalendarResources();
+    const first = state.selectAppleCalendars(["work", "life"]);
+    const second = state.selectAppleCalendars(["life"]);
+    const last = state.selectAppleCalendars(["life", "family"]);
+    expect(post).toHaveBeenCalledOnce();
+    expect(state.calendarSelection()?.ids).toEqual(["life", "family"]);
+    answers[0]({ data: { selected_ids: ["work", "life"], catalog_revision: "catalog-1" } });
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(state.calendarSelection()?.ids).toEqual(["life", "family"]);
+    expect(state.calendarResources()?.selected_ids).toEqual(["work", "life"]);
+    expect(post).toHaveBeenLastCalledWith("/api/v1/calendar/select", { calendar_ids: ["life", "family"], catalog_revision: "catalog-1" });
+    answers[1]({ data: { selected_ids: ["life", "family"], catalog_revision: "catalog-1" } });
+    await Promise.all([first, second, last]);
+    expect(state.calendarSelection()).toBeNull();
+    expect(state.calendarResources()?.selected_ids).toEqual(["life", "family"]);
+  });
+
+  it("preserves a newer acknowledgement when an earlier resource GET arrives late", async () => {
+    let answer!: (value: unknown) => void;
+    const get = vi.fn().mockResolvedValueOnce({ data: resources })
+      .mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+    const post = vi.fn().mockResolvedValue({ data: { selected_ids: ["life"], catalog_revision: "catalog-1" } });
+    const state = createRuntimeState({ get, post });
+    await state.loadCalendarResources();
+    const oldGet = state.loadCalendarResources();
+    await state.selectAppleCalendars(["life"]);
+    answer({ data: resources });
+    await oldGet;
+    expect(state.calendarResources()?.selected_ids).toEqual(["life"]);
+  });
+
+  it("keeps failed choices visible, rejects unsaved imports, then acknowledges an explicit retry", async () => {
+    const post = vi.fn().mockRejectedValueOnce(new Error("Disk full"))
+      .mockResolvedValueOnce({ data: { selected_ids: ["life"], catalog_revision: "catalog-1" } });
+    const state = createRuntimeState({ get: vi.fn().mockResolvedValue({ data: resources }), post });
+    await state.loadCalendarResources();
+    await state.selectAppleCalendars(["life"]);
+    expect(state.calendarResources()?.selected_ids).toEqual(["work"]);
+    expect(state.calendarSelection()).toEqual({ ids: ["life"], saving: false, error: "Disk full" });
+    await expect(state.readAppleCalendars(["life"])).rejects.toThrow("Save calendar choices");
+    expect(post).toHaveBeenCalledOnce();
+    await state.selectAppleCalendars(["life"]);
+    expect(state.calendarSelection()).toBeNull();
+    expect(state.calendarResources()?.selected_ids).toEqual(["life"]);
+  });
+
+  it("refuses mismatched acknowledgements rather than marking unsaved choices as saved", async () => {
+    const state = createRuntimeState({ get: vi.fn().mockResolvedValue({ data: resources }),
+      post: vi.fn().mockResolvedValue({ data: { selected_ids: ["work"], catalog_revision: "catalog-1" } }) });
+    await state.loadCalendarResources();
+    await state.selectAppleCalendars(["life"]);
+    expect(state.calendarSelection()?.error).toContain("did not acknowledge");
+    expect(state.calendarResources()?.selected_ids).toEqual(["work"]);
+  });
+
+  it("persists deselecting every calendar without invoking an import", async () => {
+    const post = vi.fn().mockResolvedValue({ data: { selected_ids: [], catalog_revision: "catalog-1" } });
+    const state = createRuntimeState({ get: vi.fn().mockResolvedValue({ data: resources }), post });
+    await state.loadCalendarResources();
+    await state.selectAppleCalendars([]);
+    expect(post).toHaveBeenCalledExactlyOnceWith("/api/v1/calendar/select", { calendar_ids: [], catalog_revision: "catalog-1" });
+    expect(state.calendarResources()?.selected_ids).toEqual([]);
+    await expect(state.readAppleCalendars([])).rejects.toThrow("Save calendar choices");
+  });
+});
+
 describe("RuntimeState Apple Mail", () => {
   it("refreshes the local snapshot after an explicit successful read", async () => {
     const get = vi.fn().mockResolvedValue({

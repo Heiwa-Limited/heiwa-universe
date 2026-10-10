@@ -167,25 +167,97 @@ fn resolve_runtime_secret(
     let Some(heiwa_home) = heiwa_home else {
         return String::new();
     };
-    let secret_path = heiwa_home.join("secrets").join(filename);
-    let Ok(link_metadata) = fs::symlink_metadata(&secret_path) else {
-        return String::new();
-    };
-    if link_metadata.file_type().is_symlink() || !link_metadata.is_file() {
-        return String::new();
+    read_runtime_secret_file(heiwa_home, filename).unwrap_or_default()
+}
+
+/// Read one private runtime secret from disk, ignoring environment overrides.
+/// Invalid storage or content is unavailable, never implicit authority. The
+/// reader does not create files or tighten permissions during inspection.
+pub fn read_runtime_secret_file(root: &Path, filename: &str) -> Option<String> {
+    use std::io::Read;
+    use std::path::Component;
+    if !root.is_absolute()
+        || !matches!(
+            Path::new(filename)
+                .components()
+                .collect::<Vec<_>>()
+                .as_slice(),
+            [Component::Normal(_)]
+        )
+        || filename.contains(['/', '\\'])
+    {
+        return None;
     }
-    if link_metadata.len() == 0 || link_metadata.len() > 4096 {
-        return String::new();
+    let directory = root.join("secrets");
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY);
+    }
+    let dir = options.open(&directory).ok()?;
+    let directory_metadata = dir.metadata().ok()?;
+    if !directory_metadata.is_dir() {
+        return None;
     }
     #[cfg(unix)]
-    if link_metadata.permissions().mode() & 0o077 != 0 {
-        return String::new();
+    {
+        use std::os::unix::fs::MetadataExt;
+        if directory_metadata.mode() & 0o077 != 0
+            || directory_metadata.uid() != unsafe { libc::geteuid() }
+        {
+            return None;
+        }
     }
-
-    fs::read_to_string(secret_path)
-        .ok()
-        .and_then(|value| normalize_runtime_secret(&value))
-        .unwrap_or_default()
+    #[cfg(not(unix))]
+    if fs::symlink_metadata(&directory)
+        .ok()?
+        .file_type()
+        .is_symlink()
+    {
+        return None;
+    }
+    // Pin the verified directory descriptor so replacement of its name cannot
+    // redirect the read. O_NOFOLLOW rejects linked leaf credentials.
+    #[cfg(unix)]
+    let file = {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        let filename = std::ffi::CString::new(filename).ok()?;
+        let fd = unsafe {
+            libc::openat(
+                dir.as_raw_fd(),
+                filename.as_ptr(),
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+            )
+        };
+        if fd < 0 {
+            return None;
+        }
+        unsafe { fs::File::from_raw_fd(fd) }
+    };
+    #[cfg(not(unix))]
+    let file = {
+        let path = directory.join(filename);
+        if fs::symlink_metadata(&path).ok()?.file_type().is_symlink() {
+            return None;
+        }
+        fs::File::open(path).ok()?
+    };
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > 4096 {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.mode() & 0o077 != 0 || metadata.uid() != unsafe { libc::geteuid() } {
+            return None;
+        }
+    }
+    let mut value = String::new();
+    file.take(4097).read_to_string(&mut value).ok()?;
+    normalize_runtime_secret(&value)
 }
 
 fn normalize_runtime_secret(value: &str) -> Option<String> {
@@ -289,6 +361,67 @@ mod tests {
         validate_existing_machine_auth(root.path()).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn file_only_secret_reader_rejects_weak_linked_nonregular_and_traversal_storage() {
+        use std::os::unix::fs::symlink;
+        let root = tempdir().unwrap();
+        ensure_machine_auth_in(root.path()).unwrap();
+        let directory = root.path().join("secrets");
+        let target = directory.join("machine_auth_token");
+        assert!(read_runtime_secret_file(root.path(), "machine_auth_token").is_some());
+        for name in [
+            "",
+            ".",
+            "..",
+            "../secrets/machine_auth_token",
+            "a/b",
+            "a\\b",
+            "/tmp/machine_auth_token",
+            "machine_auth_token/",
+        ] {
+            assert!(
+                read_runtime_secret_file(root.path(), name).is_none(),
+                "accepted unsafe name {name:?}"
+            );
+        }
+        assert!(read_runtime_secret_file(Path::new("relative"), "machine_auth_token").is_none());
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(read_runtime_secret_file(root.path(), "machine_auth_token").is_none());
+        assert_eq!(
+            fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+            0o755,
+            "inspection must not repair storage"
+        );
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(read_runtime_secret_file(root.path(), "machine_auth_token").is_none());
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        let other = root.path().join("elsewhere");
+        fs::rename(&target, &other).unwrap();
+        symlink(&other, &target).unwrap();
+        assert!(read_runtime_secret_file(root.path(), "machine_auth_token").is_none());
+        fs::remove_file(&target).unwrap();
+        fs::create_dir(&target).unwrap();
+        assert!(read_runtime_secret_file(root.path(), "machine_auth_token").is_none());
+        fs::remove_dir(&target).unwrap();
+        let fifo = std::ffi::CString::new(target.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        assert!(
+            read_runtime_secret_file(root.path(), "machine_auth_token").is_none(),
+            "nonregular FIFO must not block"
+        );
+        fs::remove_file(&target).unwrap();
+        fs::rename(&other, &target).unwrap();
+        let linked_root = tempdir().unwrap();
+        symlink(&directory, linked_root.path().join("secrets")).unwrap();
+        assert!(read_runtime_secret_file(linked_root.path(), "machine_auth_token").is_none());
+        assert!(
+            resolve_runtime_secret(None, None, Some(linked_root.path()), "machine_auth_token")
+                .is_empty()
+        );
+    }
+
     #[test]
     fn runtime_secret_prefers_primary_then_legacy_environment_values() {
         let root = tempdir().expect("tempdir");
@@ -325,6 +458,7 @@ mod tests {
         let root = tempdir().expect("tempdir");
         let secrets = root.path().join("secrets");
         std::fs::create_dir_all(&secrets).expect("secrets dir");
+        std::fs::set_permissions(&secrets, std::fs::Permissions::from_mode(0o700)).unwrap();
         let secret = secrets.join("machine_auth_token");
         std::fs::write(&secret, "file-token\n").expect("secret file");
         std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600))

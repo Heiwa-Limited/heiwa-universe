@@ -7,6 +7,8 @@ use heiwa_protocol::{ExecutionScope, RiskClass, ToolCall, ToolLease};
 use heiwa_shell::agentic::execute_tool_calls;
 use tempfile::tempdir;
 
+mod approval_fixture;
+
 static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct EnvGuard {
@@ -52,6 +54,7 @@ async fn test_approval_gate_approve_flow() {
 
     let temp = tempdir().unwrap();
     let root = temp.path().to_path_buf();
+    approval_fixture::provision_credential(&root);
 
     // Set environment overrides
     let _home = EnvGuard::set("HOME", &root);
@@ -114,12 +117,17 @@ async fn test_approval_gate_approve_flow() {
 
     println!("TEST: decision_path is {:?}", decision_path);
 
-    let decision_json = serde_json::json!({
+    let mut decision_json = serde_json::json!({
         "id": id,
         "outcome": "approved",
         "decided_at_utc": chrono::Utc::now().to_rfc3339(),
         "operator": "test-decider"
     });
+    heiwa_core::integrity::seal_decision(
+        "integration-test-credential-0123456789",
+        &mut decision_json,
+    )
+    .unwrap();
     fs::write(
         &decision_path,
         serde_json::to_string_pretty(&decision_json).unwrap(),
@@ -147,6 +155,7 @@ async fn test_approval_gate_deny_flow() {
 
     let temp = tempdir().unwrap();
     let root = temp.path().to_path_buf();
+    approval_fixture::provision_credential(&root);
 
     let _home = EnvGuard::set("HOME", &root);
     let _heiwa_home = EnvGuard::set("HEIWA_HOME", root.join(".heiwa"));
@@ -205,12 +214,17 @@ async fn test_approval_gate_deny_flow() {
 
     println!("TEST DENY: decision_path is {:?}", decision_path);
 
-    let decision_json = serde_json::json!({
+    let mut decision_json = serde_json::json!({
         "id": id,
         "outcome": "denied",
         "decided_at_utc": chrono::Utc::now().to_rfc3339(),
         "operator": "test-decider"
     });
+    heiwa_core::integrity::seal_decision(
+        "integration-test-credential-0123456789",
+        &mut decision_json,
+    )
+    .unwrap();
     fs::write(
         &decision_path,
         serde_json::to_string_pretty(&decision_json).unwrap(),

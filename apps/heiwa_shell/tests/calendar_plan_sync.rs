@@ -13,6 +13,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod approval_fixture;
 mod cli_v1;
 
 const PLAN_ID: &str = "operator-2026-09";
@@ -37,6 +38,7 @@ impl Fixture {
         let root = tempfile::tempdir().expect("temp fixture root");
         let home = root.path().join("home");
         fs::create_dir_all(home.join(".heiwa")).expect("create Heiwa root");
+        approval_fixture::provision_credential(&home);
         fs::write(
             home.join(".heiwa/local-identity.json"),
             serde_json::to_vec_pretty(&json!({

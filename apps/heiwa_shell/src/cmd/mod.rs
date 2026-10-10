@@ -2,6 +2,7 @@ pub mod app;
 pub mod apple_resources;
 pub mod approvals;
 pub(crate) mod args;
+pub(crate) mod authority;
 pub mod auto;
 pub mod calendar;
 pub(crate) mod calendar_apple;
