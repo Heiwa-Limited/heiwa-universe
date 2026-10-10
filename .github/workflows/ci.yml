@@ -180,6 +180,10 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
+      - name: Enforce witness-bound provider construction
+        run: |
+          python3 scripts/check_provider_admission.py
+          python3 -m unittest discover -s scripts/tests -p test_provider_admission_structure.py
       - name: Run Rust clippy
         run: >
           cargo clippy --workspace --exclude heiwa-desktop --locked --all-targets

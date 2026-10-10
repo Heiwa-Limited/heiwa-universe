@@ -11,17 +11,18 @@ use tokio::sync::mpsc;
 /// Wraps `claude -p <prompt> --output-format stream-json --verbose --model <model>`.
 /// For BYOK API key users, the Anthropic HTTP API adapter is preferred.
 /// This adapter is for subscription users who have Claude Code installed.
-pub struct ClaudeCodeCliAdapter;
-
-impl Default for ClaudeCodeCliAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
+pub struct ClaudeCodeCliAdapter {
+    binary: String,
 }
 
 impl ClaudeCodeCliAdapter {
-    pub fn new() -> Self {
-        Self
+    pub(crate) fn from_admitted_lane(lane: &crate::admission::RegistryAdmittedLane) -> Self {
+        let crate::Credential::OauthCli { binary } = &lane.account().credential else {
+            unreachable!("admission validates CLI credential kind");
+        };
+        Self {
+            binary: binary.clone(),
+        }
     }
 }
 
@@ -39,7 +40,7 @@ impl ProviderAdapter for ClaudeCodeCliAdapter {
             .collect::<Vec<_>>()
             .join("\n");
 
-        let mut cmd = Command::new(crate::resolve_command_or_name("claude"));
+        let mut cmd = Command::new(crate::resolve_command_or_name(&self.binary));
         crate::adapter::configure_cli_command(&mut cmd);
         cmd.arg("-p")
             .arg(&prompt)

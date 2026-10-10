@@ -23,7 +23,9 @@ matches_direct_inference() {
 }
 
 is_allowed_path() {
-  [[ "$1" == "$allowed_path" ]]
+  # This provider factory only delegates through the same admitted witness;
+  # check_provider_admission.py enforces its construction and runtime callers.
+  [[ "$1" == "$allowed_path" || "$1" == 'crates/heiwa_provider/src/routing.rs' ]]
 }
 
 is_provider_adapter_path() {
@@ -71,6 +73,7 @@ self_test() {
   matches_direct_inference "$curl_fixture" || return 1
   ! matches_direct_inference "$safe_fixture" || return 1
   is_allowed_path "$allowed_path" || return 1
+  is_allowed_path 'crates/heiwa_provider/src/routing.rs' || return 1
   ! is_allowed_path 'apps/heiwa_shell/src/other.rs' || return 1
   ! content_is_violation "$allowed_path" "$allowed_fixture" || return 1
   content_is_violation "$allowed_path" "$endpoint_fixture" || return 1

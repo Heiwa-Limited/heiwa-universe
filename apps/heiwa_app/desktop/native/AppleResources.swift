@@ -8,7 +8,7 @@ struct AppleResources {
     static let maximumRequestBytes = 4 * 1024 * 1024
     static let maximumReminderResponseBytes = 1024 * 1024
     static let maximumReminderTextBytes = 16 * 1024
-    static let maximumReminderIdentifierBytes = 1024
+    static let maximumResourceIdentifierBytes = 1024
     static let reminderFetchTimeout: TimeInterval = 5
 
     static func main() async {
@@ -18,9 +18,10 @@ struct AppleResources {
             guard let request = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let operation = request["operation"] as? String,
                   ["list", "scan", "plan_scan", "plan_apply", "reminders_list", "reminders_scan"].contains(operation) else { throw ReadError.invalidRequest }
-            if operation == "reminders_list" {
-                _ = try reminderAccessRequested(request)
-            } else if operation == "reminders_scan" {
+            try validateSchemaVersion(request)
+            let calendarScan = operation == "scan" ? try calendarSelection(request) : nil
+            let requestAccess = ["list", "reminders_list"].contains(operation) ? try resourceAccessRequested(request) : false
+            if operation == "reminders_scan" {
                 _ = try reminderSelection(request)
             }
             let store = EKEventStore()
@@ -30,7 +31,7 @@ struct AppleResources {
                 return
             }
             if [.notDetermined, .writeOnly].contains(EKEventStore.authorizationStatus(for: .event)) {
-                guard operation == "list", request["request_access"] as? Bool == true else { throw ReadError.permission }
+                guard operation == "list", requestAccess else { throw ReadError.permission }
                 guard try await store.requestFullAccessToEvents() else { throw ReadError.permission }
             }
             guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { throw ReadError.permission }
@@ -51,12 +52,8 @@ struct AppleResources {
                 return
             }
             let iso = ISO8601DateFormatter()
-            guard let ids = request["calendar_ids"] as? [String], !ids.isEmpty, ids.count <= 100,
-                  Set(ids).count == ids.count,
-                  let startText = request["start"] as? String, let start = iso.date(from: startText),
-                  let endText = request["end"] as? String, let end = iso.date(from: endText),
-                  end > start, end.timeIntervalSince(start) <= 366 * 86400,
-                  let limit = request["limit"] as? Int, (1...500).contains(limit) else { throw ReadError.invalidRequest }
+            guard let scan = calendarScan else { throw ReadError.invalidRequest }
+            let (ids, startText, endText, start, end, limit) = (scan.ids, scan.startText, scan.endText, scan.start, scan.end, scan.limit)
             let selected = calendars.filter { ids.contains($0.calendarIdentifier) }
             guard selected.count == ids.count else { throw ReadError.missingCalendar }
             // EventKit expands recurrence occurrences within the predicate's range.
@@ -115,38 +112,91 @@ struct AppleResources {
         return legacyData
     }
 
-    // MARK: Reminders read-only projection
+    // MARK: Pure request validation
 
-    static func reminderAccessRequested(_ request: [String: Any]) throws -> Bool {
+    static func boundedInteger(_ value: Any?, in bounds: ClosedRange<Int>) throws -> Int {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              number.doubleValue >= Double(bounds.lowerBound), number.doubleValue <= Double(bounds.upperBound),
+              number.doubleValue == Double(number.intValue) else { throw ReadError.invalidRequest }
+        return number.intValue
+    }
+
+    static func validateSchemaVersion(_ request: [String: Any]) throws {
+        // Older Rust/helper pairs omitted this field. A provided version is
+        // an explicit contract and must not silently select an older protocol.
+        if let version = request["schema_version"] {
+            _ = try boundedInteger(version, in: 1...1)
+        }
+    }
+
+    static func resourceAccessRequested(_ request: [String: Any]) throws -> Bool {
         guard let value = request["request_access"] else { return false }
         guard let number = value as? NSNumber,
               CFGetTypeID(number) == CFBooleanGetTypeID() else { throw ReadError.invalidRequest }
         return number.boolValue
     }
 
+    static func resourceIdentifierValid(_ id: String) -> Bool {
+        !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            id.utf8.count <= maximumResourceIdentifierBytes &&
+            !id.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
+
+    struct CalendarScanRequest {
+        let ids: [String]
+        let startText: String
+        let endText: String
+        let start: Date
+        let end: Date
+        let limit: Int
+    }
+
+    static func calendarInstant(_ value: Any?, iso: ISO8601DateFormatter) throws -> (String, Date) {
+        guard let text = value as? String, (20...25).contains(text.utf8.count),
+              let date = iso.date(from: text) else { throw ReadError.invalidRequest }
+        // Foundation accepts and normalizes impossible days (e.g. February
+        // 30). Round-trip the civil components separately so offsets remain
+        // accepted while invalid dates cannot change the requested window.
+        let civilText = String(text.prefix(19)) + "Z"
+        let zone = String(text.dropFirst(19))
+        guard zone.range(of: "^(Z|[+-][0-9]{2}:?[0-9]{2})$", options: .regularExpression) != nil,
+              let civil = iso.date(from: civilText), iso.string(from: civil) == civilText else { throw ReadError.invalidRequest }
+        if zone != "Z" {
+            let digits = zone.dropFirst().replacingOccurrences(of: ":", with: "")
+            guard let hours = Int(digits.prefix(2)), hours <= 23,
+                  let minutes = Int(digits.suffix(2)), minutes <= 59 else { throw ReadError.invalidRequest }
+        }
+        return (text, date)
+    }
+
+    static func calendarSelection(_ request: [String: Any]) throws -> CalendarScanRequest {
+        guard let ids = request["calendar_ids"] as? [String], !ids.isEmpty, ids.count <= 100,
+              Set(ids).count == ids.count, ids.allSatisfy(resourceIdentifierValid) else { throw ReadError.invalidRequest }
+        let iso = ISO8601DateFormatter()
+        let (startText, start) = try calendarInstant(request["start"], iso: iso)
+        let (endText, end) = try calendarInstant(request["end"], iso: iso)
+        guard end > start, end.timeIntervalSince(start) <= 366 * 86400 else { throw ReadError.invalidRequest }
+        return CalendarScanRequest(ids: ids, startText: startText, endText: endText, start: start, end: end,
+                                   limit: try boundedInteger(request["limit"], in: 1...500))
+    }
+
+    // MARK: Reminders read-only projection
+
     static func reminderSelection(_ request: [String: Any]) throws -> ([String], Int) {
         guard let ids = request["list_ids"] as? [String], !ids.isEmpty, ids.count <= 100,
               Set(ids).count == ids.count,
-              ids.allSatisfy(reminderIdentifierValid),
-              let number = request["limit"] as? NSNumber,
-              CFGetTypeID(number) != CFBooleanGetTypeID(),
-              (1...500).contains(number.intValue), number.doubleValue == Double(number.intValue) else {
+              ids.allSatisfy(resourceIdentifierValid) else {
             throw ReadError.invalidRequest
         }
-        return (ids, number.intValue)
-    }
-
-    static func reminderIdentifierValid(_ id: String) -> Bool {
-        !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            id.utf8.count <= maximumReminderIdentifierBytes &&
-            !id.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        return (ids, try boundedInteger(request["limit"], in: 1...500))
     }
 
     static func remindersRead(store: EKEventStore, request: [String: Any], operation: String) async throws -> [String: Any] {
         // This gate is independent of Calendar enrollment, selection, and TCC.
         let status = EKEventStore.authorizationStatus(for: .reminder)
         if [.notDetermined, .writeOnly].contains(status) {
-            guard operation == "reminders_list", try reminderAccessRequested(request) else {
+            guard operation == "reminders_list", try resourceAccessRequested(request) else {
                 throw ReadError.remindersPermission
             }
             guard try await store.requestFullAccessToReminders() else { throw ReadError.remindersPermission }
@@ -201,7 +251,7 @@ struct AppleResources {
         mutating func append(_ row: [String: Any]) throws {
             if row.contains(where: { key, value in
                 guard let text = value as? String else { return false }
-                return ["id", "list_id"].contains(key) ? !reminderIdentifierValid(text) : text.utf8.count > maximumReminderTextBytes
+                return ["id", "list_id"].contains(key) ? !resourceIdentifierValid(text) : text.utf8.count > maximumReminderTextBytes
             }) {
                 omitted = true
                 return

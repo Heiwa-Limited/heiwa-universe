@@ -1,8 +1,9 @@
 # Heiwa project-level Codex config
 # Overrides ~/.codex/config.toml within ~/heiwa-universe/
 #
-# Global settings (model, personality, approval_policy, sandbox_mode)
-# are inherited — only Heiwa-specific overrides below.
+# Model and personality are inherited. Approval and sandbox defaults are
+# explicit here; this file does not change a running desktop session.
+# Use native Git tooling; do not add duplicate gateways or unverified packages.
 
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"

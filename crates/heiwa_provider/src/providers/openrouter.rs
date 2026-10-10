@@ -21,22 +21,11 @@ pub struct OpenRouterAdapter {
 }
 
 impl OpenRouterAdapter {
-    /// Build from the first connected OpenRouter account in the registry.
-    /// Returns `None` when no OpenRouter account is registered.
-    pub fn from_registry() -> Option<Self> {
-        let registry = crate::AccountRegistry::load();
-        let account = registry
-            .accounts
-            .iter()
-            .find(|a| a.provider == "openrouter")?;
-        Some(Self {
-            account_id: account.account_id.clone(),
-            models: account
-                .models
-                .iter()
-                .map(|m| m.provider_model_id.clone())
-                .collect(),
-        })
+    pub(crate) fn from_admitted_lane(lane: &crate::admission::RegistryAdmittedLane) -> Self {
+        Self {
+            account_id: lane.account_id().to_string(),
+            models: vec![lane.provider_model_id().to_string()],
+        }
     }
 }
 

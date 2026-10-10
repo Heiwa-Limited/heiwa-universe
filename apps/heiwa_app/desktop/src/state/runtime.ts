@@ -3,6 +3,8 @@ import {
   apiGet,
   apiPost,
   readAppleMail,
+  RuntimeActionError,
+  runtimeErrorMessage,
   runtimeHealth,
   type AppleMailScanResult,
   type RuntimeHealth,
@@ -13,6 +15,7 @@ import type {
   CalendarEvent,
   CalendarRange,
   CalendarResources,
+  CalendarSelection,
   CalendarSyncStatus,
   FinanceSummary,
   FinanceSyncResult,
@@ -37,6 +40,7 @@ export type RuntimeState = {
   /** An event another surface asked the Calendar to open. */
   calendarFocus: Accessor<string | undefined>;
   calendarResources: Accessor<CalendarResources | null>;
+  calendarSelection: Accessor<CalendarSelection | null>;
   approvals: Accessor<ApprovalsSummary | null>;
   inbox: Accessor<InboxItem[]>;
   /** Messages from the local Mail.app snapshot; empty until a scan runs. */
@@ -63,6 +67,7 @@ export type RuntimeState = {
   focusCalendarEvent: (id: string | undefined) => void;
   loadCalendarResources: () => Promise<void>;
   connectAppleCalendar: () => Promise<void>;
+  selectAppleCalendars: (ids: string[]) => Promise<void>;
   readAppleCalendars: (ids: string[]) => Promise<{ fetched: number; truncated: boolean }>;
   disconnectAppleCalendar: () => Promise<void>;
   /** Apple Reminders, read only. Every call goes through the app runtime so macOS attributes access to Heiwa. */
@@ -134,6 +139,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
   const [calendarFocus, setCalendarFocus] = createSignal<string>();
   const [calendarResources, setCalendarResources] =
     createSignal<CalendarResources | null>(null);
+  const [calendarSelection, setCalendarSelection] = createSignal<CalendarSelection | null>(null);
   const [approvals, setApprovals] = createSignal<ApprovalsSummary | null>(null);
   const [inbox, setInbox] = createSignal<InboxItem[]>([]);
   const [mail, setMail] = createSignal<MailMessage[]>([]);
@@ -206,10 +212,23 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     return syncInFlight;
   }
 
+  let selectionIntent = 0;
+  let selectionEpoch = 0;
+  let resourcesRequest = 0;
+  let selectionInFlight: Promise<void> | undefined;
+
   async function loadCalendarResources(): Promise<void> {
+    const request = ++resourcesRequest;
+    const epoch = selectionEpoch;
     try {
       const response = await get<CalendarResourcesResponse>("/api/v1/calendar/resources");
-      setCalendarResources(response?.data ?? null);
+      if (request !== resourcesRequest) return;
+      const next = response?.data ?? null;
+      // A GET started before a selection acknowledgement can carry older IDs.
+      // Retain those already acknowledged while admitting fresh catalog facts.
+      setCalendarResources(epoch === selectionEpoch || !next ? next : {
+        ...next, selected_ids: calendarResources()?.selected_ids ?? [],
+      });
     } catch {
       // Keep the last known connection. Dropping to null on a transient
       // failure flips a connected calendar back to "Checking…" and hides it.
@@ -221,7 +240,56 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     await loadCalendarResources();
   }
 
+  function selectAppleCalendars(ids: string[]): Promise<void> {
+    ++selectionIntent;
+    ++selectionEpoch;
+    setCalendarSelection({ ids: [...ids], saving: true, error: null });
+    return persistCalendarSelection();
+  }
+
+  function persistCalendarSelection(): Promise<void> {
+    if (selectionInFlight) return selectionInFlight;
+    // Only one save is in flight. Further clicks replace the next intent;
+    // an earlier acknowledgement never rolls back what the user just chose.
+    selectionInFlight = (async () => {
+      while (calendarSelection()?.saving) {
+        const intent = selectionIntent;
+        const requested = [...calendarSelection()!.ids];
+        try {
+          const revision = calendarResources()?.catalog_revision;
+          if (!revision) throw new RuntimeActionError("Refresh the calendar list before saving choices.");
+          const response = await post<{ data: { selected_ids: string[]; catalog_revision: string } }>(
+            "/api/v1/calendar/select", { calendar_ids: requested, catalog_revision: revision },
+          );
+          const ack = response.data;
+          if (ack?.catalog_revision !== revision || !Array.isArray(ack?.selected_ids)
+              || JSON.stringify(ack.selected_ids) !== JSON.stringify(requested)) {
+            throw new RuntimeActionError("The runtime did not acknowledge these calendar choices. Refresh and retry.");
+          }
+          ++selectionEpoch;
+          setCalendarResources((previous) => previous && ({ ...previous, selected_ids: [...ack.selected_ids] }));
+          if (intent === selectionIntent) setCalendarSelection(null);
+        } catch (cause) {
+          if (intent === selectionIntent) {
+            setCalendarSelection({ ids: requested, saving: false,
+              error: runtimeErrorMessage(cause, "Calendar choices could not be saved. Refresh the calendar list and retry.") });
+          }
+        }
+      }
+    })().finally(() => {
+      selectionInFlight = undefined;
+      // A reactive click can arrive after the last acknowledgement but before
+      // this promise settles. Drain that intent as well.
+      if (calendarSelection()?.saving) return persistCalendarSelection();
+    });
+    return selectionInFlight;
+  }
+
   async function readAppleCalendars(ids: string[]): Promise<{ fetched: number; truncated: boolean }> {
+    const saved = calendarResources()?.selected_ids ?? [];
+    if (calendarSelection() || !ids.length || JSON.stringify(ids) !== JSON.stringify(saved)) {
+      throw new RuntimeActionError("Save calendar choices before syncing events.");
+    }
     const response = await post<{ data: { fetched: number; truncated: boolean } }>("/api/v1/calendar/read", { calendar_ids: ids });
     await Promise.all([loadCalendar(), loadCalendarResources()]);
     return response.data;
@@ -396,6 +464,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     syncCalendar,
     focusCalendarEvent: setCalendarFocus,
     calendarResources,
+    calendarSelection,
     approvals,
     inbox,
     mail,
@@ -411,6 +480,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     loadCalendar,
     loadCalendarResources,
     connectAppleCalendar,
+    selectAppleCalendars,
     readAppleCalendars,
     disconnectAppleCalendar,
     reminderStatus,

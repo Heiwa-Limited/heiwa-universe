@@ -5,6 +5,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use super::authority::{self, DecisionKey, Integrity, Principal};
 use crate::output::{self, CliError};
 
 pub fn run(args: &[String]) -> Result<()> {
@@ -25,10 +26,11 @@ pub fn run(args: &[String]) -> Result<()> {
 }
 
 fn list(args: &[String]) -> Result<()> {
-    let entries = pending_request_entries_in(&requests_dir(), &decisions_dir());
+    let key = DecisionKey::load_default().ok();
+    let entries = pending_request_entries_in(&requests_dir(), &decisions_dir(), key.as_ref());
     let next = list_next(&entries);
     let pending: Vec<Value> = entries.into_iter().map(|(_, request)| request).collect();
-    let decisions = scan_decisions();
+    let decisions = scan_decisions_in(&decisions_dir(), key.as_ref());
     let pending_summary: Vec<Value> = pending.iter().map(approval_request_summary).collect();
     let data = json!({
         "requests_dir": requests_dir().display().to_string(),
@@ -36,6 +38,7 @@ fn list(args: &[String]) -> Result<()> {
         "pending": pending,
         "pending_summary": pending_summary,
         "decided": decisions,
+        "decisions_verifiable": key.is_some(),
     });
     output::emit(has_flag(args, "--json"), data, &next, render_list)
 }
@@ -71,6 +74,15 @@ fn render_list(data: &Value) {
         "  decisions: {} on record",
         data["decided"].as_array().map_or(0, Vec::len)
     );
+    let unverified = data["decided"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|decision| decision["record_integrity"] != "verified")
+        .count();
+    if unverified != 0 {
+        println!("  unverified decisions: {unverified}; preserved for inspection; reconciliation required");
+    }
     println!(
         "  requests dir: {}",
         data["requests_dir"].as_str().unwrap_or("?")
@@ -165,7 +177,8 @@ fn decide(args: &[String]) -> Result<()> {
         });
     }
 
-    let result = decide_request(id, approve, flag_value(args, "--note"), "local-cli")?;
+    let principal = Principal::cli()?;
+    let result = decide_request(id, approve, flag_value(args, "--note"), &principal)?;
     let decision_out = result["decision"].clone();
     let applied = decision_out["applied_effects"].clone();
     let data = json!({
@@ -199,42 +212,56 @@ pub(crate) fn decide_request(
     id: &str,
     approve: bool,
     note: Option<String>,
-    operator: &str,
+    principal: &Principal,
 ) -> Result<Value> {
     validate_request_id(id)?;
     let _lease = DecisionLease::acquire(id)?;
     let path = decisions_dir().join(format!("{id}.json"));
     let requested_outcome = if approve { "approved" } else { "denied" };
-    if path.exists() {
-        let existing: Value = serde_json::from_slice(&fs::read(&path)?)
-            .map_err(|error| anyhow!("recorded decision {id} is malformed: {error}"))?;
-        let existing_outcome = existing
-            .get("outcome")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("recorded decision {id} has no outcome"))?;
-        if existing_outcome != requested_outcome {
-            return Err(anyhow!(
-                "approval {id} is already {existing_outcome}; recorded decisions are immutable"
-            ));
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) => {
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(anyhow!("decision integrity verification failed for {id}: nonregular record; reconciliation needed"));
+            }
+            let existing = heiwa_core::integrity::read_decision_record(&path).map_err(|_| {
+                anyhow!("decision integrity verification failed for {id}: unreadable or malformed record; reconciliation needed")
+            })?;
+            let integrity = authority::classify(Some(principal.key()), id, &existing);
+            if integrity != Integrity::Verified {
+                return Err(anyhow!("decision integrity verification failed for {id}: {}; reconciliation needed; existing record was preserved", integrity.as_str()));
+            }
+            let existing_outcome = existing
+                .get("outcome")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("recorded decision {id} has no outcome"))?;
+            if existing_outcome != requested_outcome {
+                return Err(anyhow!(
+                    "approval {id} is already {existing_outcome}; recorded decisions are immutable"
+                ));
+            }
+            return Ok(json!({
+                "decision": existing,
+                "path": path.display().to_string(),
+                "replayed": true,
+            }));
         }
-        return Ok(json!({
-            "decision": existing,
-            "path": path.display().to_string(),
-            "replayed": true,
-        }));
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
 
     let plan = compute_effects(id, approve)?;
     let applied = apply_effects(id, &plan, approve)?;
-    let decision = json!({
+    let mut decision = json!({
         "id": id,
         "outcome": requested_outcome,
         "decided_at_utc": Utc::now().to_rfc3339(),
-        "operator": operator,
+        "operator": principal.display_label(),
+        "principal": principal.to_json(),
         "note": note,
         "effects": plan,
         "applied_effects": applied,
     });
+    authority::seal(principal.key(), &mut decision)?;
     write_decision_atomic(&path, &decision)?;
     Ok(json!({
         "decision": decision,
@@ -305,19 +332,25 @@ fn write_decision_atomic(path: &Path, decision: &Value) -> Result<()> {
         uuid::Uuid::new_v4().simple()
     ));
     let result = (|| -> Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)?;
-        file.write_all(&serde_json::to_vec_pretty(decision)?)?;
-        file.sync_all()?;
+        let mut options = fs::OpenOptions::new();
+        options.create_new(true).write(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
+        let mut file = options.open(&temporary)?;
+        file.write_all(&serde_json::to_vec_pretty(decision)?)?;
+        file.sync_all()?;
         drop(file);
-        fs::rename(&temporary, path)?;
+        // Publish without replacing an existing decision, including a record
+        // that appeared during effects. Such a collision needs reconciliation.
+        fs::hard_link(&temporary, path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                anyhow!("decision record appeared while applying effects; reconciliation needed; existing record was preserved")
+            } else { anyhow!(error) }
+        })?;
+        fs::remove_file(&temporary)?;
         let _ = fs::File::open(dir).and_then(|directory| directory.sync_all());
         Ok(())
     })();
@@ -328,13 +361,7 @@ fn write_decision_atomic(path: &Path, decision: &Value) -> Result<()> {
 }
 
 fn validate_request_id(id: &str) -> Result<()> {
-    if id.is_empty()
-        || id.len() > 160
-        || matches!(id, "." | "..")
-        || !id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-    {
+    if !heiwa_core::integrity::valid_decision_id(id) {
         return Err(anyhow!("invalid approval request id"));
     }
     Ok(())
@@ -553,12 +580,30 @@ fn summarize_effects(plan: &Value) -> String {
     }
 }
 
+/// Verified request IDs for runtime summaries and event consumers.
+pub(crate) fn scan_verified_decision_ids_in(dir: &Path) -> std::collections::HashSet<String> {
+    let key = DecisionKey::load_default().ok();
+    scan_verified_decision_ids_with_key(dir, key.as_ref())
+}
+
+pub(crate) fn scan_verified_decision_ids_with_key(
+    dir: &Path,
+    key: Option<&DecisionKey>,
+) -> std::collections::HashSet<String> {
+    scan_decisions_in(dir, key)
+        .into_iter()
+        .filter(|decision| decision["record_integrity"] == "verified")
+        .filter_map(|decision| decision["id"].as_str().map(str::to_string))
+        .collect()
+}
+
 pub(crate) fn scan_pending_requests() -> Vec<Value> {
     scan_pending_requests_in(&requests_dir(), &decisions_dir())
 }
 
 pub(crate) fn scan_pending_requests_in(requests: &Path, decisions: &Path) -> Vec<Value> {
-    pending_request_entries_in(requests, decisions)
+    let key = DecisionKey::load_default().ok();
+    pending_request_entries_in(requests, decisions, key.as_ref())
         .into_iter()
         .map(|(_, request)| request)
         .collect()
@@ -566,15 +611,16 @@ pub(crate) fn scan_pending_requests_in(requests: &Path, decisions: &Path) -> Vec
 
 /// Pending request files as `(file stem, parsed request)`. The stem is the
 /// key `show` and decisions resolve; the parsed content is untrusted data.
-fn pending_request_entries_in(requests: &Path, decisions: &Path) -> Vec<(String, Value)> {
+fn pending_request_entries_in(
+    requests: &Path,
+    decisions: &Path,
+    key: Option<&DecisionKey>,
+) -> Vec<(String, Value)> {
     let mut out = Vec::new();
     let Ok(entries) = fs::read_dir(requests) else {
         return out;
     };
-    let decided: std::collections::HashSet<String> = scan_decisions_in(decisions)
-        .into_iter()
-        .filter_map(|d| d.get("id").and_then(Value::as_str).map(|s| s.to_string()))
-        .collect();
+    let decided = scan_verified_decision_ids_with_key(decisions, key);
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -647,24 +693,33 @@ fn string_field(value: &Value, fields: &[&str]) -> Option<String> {
     })
 }
 
-fn scan_decisions() -> Vec<Value> {
-    scan_decisions_in(&decisions_dir())
-}
-
-fn scan_decisions_in(dir: &Path) -> Vec<Value> {
+fn scan_decisions_in(dir: &Path, key: Option<&DecisionKey>) -> Vec<Value> {
     let mut out = Vec::new();
     let Ok(entries) = fs::read_dir(dir) else {
         return out;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
             continue;
         }
-        let raw = fs::read_to_string(&path).unwrap_or_default();
-        if let Ok(value) = serde_json::from_str::<Value>(&raw) {
-            out.push(value);
+        let stem = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("");
+        let (mut value, status) = match heiwa_core::integrity::read_decision_record(&path) {
+            Ok(value) => {
+                let status = authority::classify(key, stem, &value).as_str();
+                (value, status)
+            }
+            Err(_) => (json!({"id": stem}), "unreadable_or_malformed"),
+        };
+        if !value.is_object() {
+            value = json!({"id": stem, "record": value});
         }
+        value["record_integrity"] = json!(status);
+        value["record_path"] = json!(path.display().to_string());
+        out.push(value);
     }
     out
 }
@@ -675,6 +730,17 @@ fn dispatch_dir() -> PathBuf {
 
 pub(crate) fn requests_dir() -> PathBuf {
     dispatch_dir().join("requests")
+}
+
+/// Used by staging surfaces: file existence alone is not a decided request.
+pub(crate) fn decision_is_verified(id: &str) -> bool {
+    if validate_request_id(id).is_err() {
+        return false;
+    }
+    let key = DecisionKey::load_default().ok();
+    let path = decisions_dir().join(format!("{id}.json"));
+    heiwa_core::integrity::read_decision_record(&path)
+        .is_ok_and(|record| authority::classify(key.as_ref(), id, &record) == Integrity::Verified)
 }
 
 pub(crate) fn decisions_dir() -> PathBuf {
@@ -734,6 +800,63 @@ mod tests {
     }
 
     #[test]
+    fn pending_scans_require_integrity_and_the_same_file_stem() {
+        let (root, key) = authority::tests::keyed_root();
+        let requests = root.path().join("requests");
+        let decisions = root.path().join("decisions");
+        fs::create_dir(&requests).unwrap();
+        fs::create_dir(&decisions).unwrap();
+        for id in ["req_a", "req_b"] {
+            fs::write(
+                requests.join(format!("{id}.json")),
+                json!({"id":id}).to_string(),
+            )
+            .unwrap();
+        }
+        let mut record = json!({"id":"req_a", "outcome":"approved"});
+        authority::seal(&key, &mut record).unwrap();
+        fs::write(decisions.join("req_b.json"), record.to_string()).unwrap();
+        assert_eq!(
+            pending_request_entries_in(&requests, &decisions, Some(&key)).len(),
+            2,
+            "renamed record cannot hide another request"
+        );
+        fs::write(decisions.join("req_a.json"), record.to_string()).unwrap();
+        let pending = pending_request_entries_in(&requests, &decisions, Some(&key));
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].0, "req_b");
+        assert_eq!(
+            pending_request_entries_in(&requests, &decisions, None).len(),
+            2,
+            "no key never closes pending requests"
+        );
+        record["outcome"] = json!("denied");
+        fs::write(decisions.join("req_a.json"), record.to_string()).unwrap();
+        assert_eq!(
+            pending_request_entries_in(&requests, &decisions, Some(&key)).len(),
+            2,
+            "tampering never closes pending requests"
+        );
+    }
+
+    #[test]
+    fn decision_publication_never_overwrites_an_existing_record() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("req_a.json");
+        fs::write(&path, "historical-unverified-record").unwrap();
+        assert!(write_decision_atomic(&path, &json!({"id":"req_a"})).is_err());
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "historical-unverified-record"
+        );
+        assert_eq!(
+            fs::read_dir(directory.path()).unwrap().count(),
+            1,
+            "temporary file cleaned after collision"
+        );
+    }
+
+    #[test]
     fn list_hints_use_validated_stems_not_request_content() {
         let entries = vec![
             ("req_evil".to_string(), json!({"id": "x; touch /tmp/pwned"})),
@@ -760,7 +883,7 @@ mod tests {
         fs::write(requests.join("req_a.json"), r#"{"id": "content-id"}"#).expect("a");
         fs::write(requests.join("req_b.json"), r#"{"action": "x"}"#).expect("b");
 
-        let mut entries = pending_request_entries_in(&requests, &decisions);
+        let mut entries = pending_request_entries_in(&requests, &decisions, None);
         entries.sort_by(|left, right| left.0.cmp(&right.0));
         let stems: Vec<&str> = entries.iter().map(|(stem, _)| stem.as_str()).collect();
         assert_eq!(stems, vec!["req_a", "req_b"]);

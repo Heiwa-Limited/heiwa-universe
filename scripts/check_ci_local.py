@@ -213,6 +213,9 @@ def check_inventory(root: Path, *, full: bool, python: str) -> list[Check]:
     # Syncing only the docs extra removes pytest from an existing .venv.
     add("strict docs build", "uv", "run", "--locked", "--extra", "dev", "--extra", "docs", "python", "-m", "mkdocs", "build", "--strict")
     add("agent instruction sync", python, "scripts/sync_agents.py", "--check")
+    add("provider admission structure", python, "scripts/check_provider_admission.py")
+    add("provider admission regressions", python, "-m", "unittest", "discover",
+        "-s", "scripts/tests", "-p", "test_provider_admission_structure.py")
     add("local Python resolver", "bash", "scripts/tests/test_local_python_resolution.sh")
     add("Justfile Python override", "bash", "scripts/tests/test_just_python_override.sh")
     add("release source regression", "bash", "scripts/tests/test_release_workflow_source.sh")

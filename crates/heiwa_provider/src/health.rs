@@ -91,6 +91,13 @@ fn classify(
         }
     }
 
+    if !crate::admission::configured_channel_supported(account) {
+        return (
+            HealthState::Unreachable,
+            "this configured provider channel has no supported adapter".to_string(),
+        );
+    }
+
     match &account.status {
         // Connected with nothing to offer is not usable. It happens on a
         // normal path — add a key while offline, or during a provider 5xx,
@@ -102,6 +109,10 @@ fn classify(
             "connected but no models have been detected yet; re-add the key \
              (heiwa auth add-key) to probe the provider's model list"
                 .to_string(),
+        ),
+        AccountStatus::Connected if !account.models.iter().any(|model| crate::admission::model_is_admissible(account, model)) => (
+            HealthState::Unreachable,
+            "model inventory is unverified or belongs to another account; refresh this account's inventory".to_string(),
         ),
         AccountStatus::Connected => (HealthState::Healthy, String::new()),
         AccountStatus::NeedsAuth => (
@@ -115,7 +126,7 @@ fn classify(
             ),
             Credential::OauthCli { binary } => (
                 HealthState::Unauthenticated,
-                format!("`{binary}` is installed but not signed in"),
+                format!("`{binary}` is installed; provider sign-in and inventory have not been verified by Heiwa"),
             ),
             _ => (
                 HealthState::Unreachable,
@@ -446,5 +457,17 @@ mod tests {
         let fleet =
             FleetHealth::project(&[stocked("anthropic-api-1", "anthropic", Credential::ApiKey)]);
         assert!(fleet.guidance().is_empty());
+    }
+    #[test]
+    fn unsupported_execution_channels_cannot_make_the_fleet_look_routable() {
+        let mut configured = stocked("anthropic-api-1", "anthropic", Credential::ApiKey);
+        configured.credential = Credential::OAuth { expires_at: None };
+        let report = AccountHealth::project_with(&configured, |_| true);
+        assert!(!report.routable);
+        assert!(report.detail.contains("supported adapter"));
+        configured.credential = Credential::ApiKey;
+        configured.provider = "unknown-provider".into();
+        configured.models[0].provider = "unknown-provider".into();
+        assert!(!AccountHealth::project_with(&configured, |_| true).routable);
     }
 }

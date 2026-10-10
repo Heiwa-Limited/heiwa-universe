@@ -3513,6 +3513,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "heiwa-core",
  "heiwa-provider",
  "heiwa_config",
  "heiwa_mcp",

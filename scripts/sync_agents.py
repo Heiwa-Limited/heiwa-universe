@@ -208,7 +208,21 @@ def check_codex_config() -> list[str]:
     with open(config_path, "rb") as f:
         config = tomllib.load(f)
 
-    mcp_keys = set(config.get("mcp_servers", {}).keys())
+    servers = config.get("mcp_servers", {})
+    mcp_keys = set(servers.keys())
+    process_servers: dict[str, str] = {}
+    for name, server in servers.items():
+        if server.get("enabled", True) is False or not server.get("command"):
+            continue
+        # Compare process identity including its environment; never include
+        # transport values or credentials in the diagnostic.
+        identity = repr((server["command"], tuple(server.get("args", [])),
+                         tuple(sorted(server.get("env", {}).items()))))
+        previous = process_servers.get(identity)
+        if previous is not None:
+            errors.append(f"CODEX CONFIG: duplicate MCP process '{previous}' and '{name}'")
+        else:
+            process_servers[identity] = name
     for required in sorted(REQUIRED_CODEX_MCP):
         if required not in mcp_keys:
             errors.append(f"CODEX CONFIG: missing MCP server '{required}'")

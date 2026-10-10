@@ -81,7 +81,7 @@ export function FirstRun(props: ProviderConnectionActions & {
       <Show when={resource.surface && props.onOpenSurface}>
         <button class="first-run-button secondary" disabled={busy() || !props.state.workspace?.can_enter}
           onClick={() => void run(() => props.onOpenSurface!(resource.surface!))}>
-          Open {resource.name === "Apple Calendar" ? "Calendar setup" : "Mail"}
+          Open {{ calendar: "Calendar setup", mail: "Mail", reminders: "Reminders" }[resource.surface!]}
         </button>
       </Show>
       <Show when={resource.has_guide && props.onOpenResourceGuide}>

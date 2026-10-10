@@ -55,10 +55,14 @@ export type CalendarResources = {
   status: string;
   calendars: CalendarResource[];
   selected_ids?: string[];
+  catalog_revision?: string | null;
   reader_available?: boolean;
   detail?: string | null;
   next_action?: string | null;
 };
+
+/** Pending choices are deliberately separate from the runtime's saved selection. */
+export type CalendarSelection = { ids: string[]; saving: boolean; error: string | null };
 
 export type PendingApproval = {
   id: string;

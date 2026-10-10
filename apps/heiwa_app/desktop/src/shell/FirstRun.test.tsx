@@ -65,6 +65,16 @@ describe("per-user workspace setup", () => {
   });
 });
 
+it("names the Reminders destination and opens it without implying enrollment", async () => {
+  const state = localOnly();
+  state.workspace!.resources.push({ id: "reminders", name: "Apple Reminders", category: "apple", app_detected: true, tools_detected: [], registered_accounts: 0, detail: "Connect lists separately.", surface: "reminders", has_guide: false });
+  const open = vi.fn();
+  render(() => <FirstRun state={state} onEstablishIdentity={() => {}} onRecheck={() => {}} onOpenSurface={open} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open Reminders" }));
+  await waitFor(() => expect(open).toHaveBeenCalledWith("reminders"));
+  expect(screen.queryByText("Connected")).toBeNull();
+});
+
 describe("inference tool cards", () => {
   const now = new Date("2026-10-08T12:00:00Z");
   const withTools = (): OnboardingState => ({

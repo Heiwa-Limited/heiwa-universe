@@ -205,7 +205,7 @@ fn sha256_hex(input: &[u8]) -> String {
     output
 }
 
-fn constant_time_eq(expected: &[u8], actual: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(expected: &[u8], actual: &[u8]) -> bool {
     let mut difference = expected.len() ^ actual.len();
     let compared = expected.len().max(actual.len());
     for index in 0..compared {
@@ -391,7 +391,7 @@ fn now_epoch_seconds() -> i64 {
         .as_secs() as i64
 }
 
-fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+pub(crate) fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     const BLOCK_SIZE: usize = 64;
 
     let mut working_key = [0_u8; BLOCK_SIZE];

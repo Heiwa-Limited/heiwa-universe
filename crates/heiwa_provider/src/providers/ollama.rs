@@ -13,24 +13,17 @@ use tokio::sync::mpsc;
 /// inline. Preserves newlines so downstream markdown renders correctly.
 pub struct OllamaCliAdapter {
     default_model: String,
-}
-
-impl Default for OllamaCliAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
+    endpoint: String,
 }
 
 impl OllamaCliAdapter {
-    pub fn new() -> Self {
+    pub(crate) fn from_admitted_lane(lane: &crate::admission::RegistryAdmittedLane) -> Self {
+        let crate::Credential::LocalRuntime { endpoint } = &lane.account().credential else {
+            unreachable!("admission validates local-runtime credential kind");
+        };
         Self {
-            default_model: "llama3".to_string(),
-        }
-    }
-
-    pub fn with_model(model: &str) -> Self {
-        Self {
-            default_model: model.to_string(),
+            default_model: lane.provider_model_id().to_string(),
+            endpoint: endpoint.clone(),
         }
     }
 }
@@ -60,6 +53,7 @@ impl ProviderAdapter for OllamaCliAdapter {
         let mut cmd = Command::new(crate::resolve_command_or_name("ollama"));
         crate::adapter::configure_cli_command(&mut cmd);
         let mut child = cmd
+            .env("OLLAMA_HOST", &self.endpoint)
             .arg("run")
             .arg(model)
             .arg(&prompt)

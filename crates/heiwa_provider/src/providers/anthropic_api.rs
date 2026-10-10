@@ -34,50 +34,17 @@ pub struct AnthropicApiAdapter {
 }
 
 impl AnthropicApiAdapter {
-    /// Build from the first API-key Anthropic account in the registry.
-    pub fn from_registry() -> Option<Self> {
-        let registry = crate::AccountRegistry::load();
-        let account = registry.accounts.iter().find(|account| {
-            account.provider == "anthropic"
-                && matches!(account.credential, crate::Credential::ApiKey)
-        })?;
-        Some(Self {
-            account_id: account.account_id.clone(),
-            base_url: DEFAULT_BASE_URL.to_string(),
-            models: account
-                .models
-                .iter()
-                .map(|model| model.provider_model_id.clone())
-                .collect(),
-            api_key: None,
-        })
-    }
-
-    /// Explicit construction. `base_url` is a constructor argument rather
-    /// than an env lookup so the fresh-install harness can point the adapter
-    /// at a loopback mock without the adapter knowing it is under test.
-    pub fn new(account_id: impl Into<String>, base_url: impl Into<String>) -> Self {
+    /// Construct only the account/model selected by provider admission.
+    pub(crate) fn from_admitted_lane(
+        lane: &crate::admission::RegistryAdmittedLane,
+        base_url: &str,
+    ) -> Self {
         Self {
-            account_id: account_id.into(),
-            base_url: base_url.into(),
-            models: Vec::new(),
+            account_id: lane.account_id().to_string(),
+            base_url: base_url.to_string(),
+            models: vec![lane.provider_model_id().to_string()],
             api_key: None,
         }
-    }
-
-    /// Supply the credential directly instead of reading the OS keychain.
-    ///
-    /// Not every deployment has a keychain: a headless server or container
-    /// holds its secrets elsewhere, and the embedder is the one that knows
-    /// where. The keychain stays the default for desktop installs.
-    pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
-        self.api_key = Some(api_key.into());
-        self
-    }
-
-    pub fn with_models(mut self, models: Vec<String>) -> Self {
-        self.models = models;
-        self
     }
 }
 

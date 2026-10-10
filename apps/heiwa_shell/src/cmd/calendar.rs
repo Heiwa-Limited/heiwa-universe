@@ -143,6 +143,7 @@ pub(crate) fn apple_calendar_resources_payload() -> Result<Value> {
         },
         "calendars": calendars,
         "selected_ids": super::calendar_read::selected_ids()?,
+        "catalog_revision": if reader_available { super::calendar_read::selection_catalog_revision()? } else { None },
         "reader_available": reader_available,
         "detail": detail,
         "revoke": {

@@ -177,7 +177,7 @@ pub enum PriceTruth {
 }
 
 /// A model detected or configured for a specific provider account.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DetectedModel {
     /// Heiwa-normalized model name.  e.g. "claude-sonnet-4"
     pub model_id: String,
@@ -341,9 +341,23 @@ impl AccountRegistry {
     /// the assertion does not depend on whether the machine running it happens
     /// to have `claude` or `ollama` installed.
     pub fn routable_models_with(&self, is_installed: impl Fn(&str) -> bool) -> Vec<&DetectedModel> {
+        let admitted = crate::admission::admitted_candidates_with(self, &is_installed);
         self.models_where(|account| {
             crate::health::AccountHealth::project_with(account, &is_installed).routable
         })
+        .into_iter()
+        .filter(|model| {
+            admitted.iter().any(|candidate| {
+                candidate.lane.account_id() == model.account_id
+                    && candidate.lane.provider_model_id() == model.provider_model_id
+                    && crate::admission::model_is_admissible(
+                        self.get(&model.account_id)
+                            .expect("model belongs to an existing account"),
+                        model,
+                    )
+            })
+        })
+        .collect()
     }
 
     fn models_where(&self, usable: impl Fn(&ProviderAccount) -> bool) -> Vec<&DetectedModel> {
@@ -351,7 +365,14 @@ impl AccountRegistry {
             .accounts
             .iter()
             .filter(|account| usable(account))
-            .flat_map(|a| a.models.iter())
+            .flat_map(|account| {
+                account.models.iter().filter(move |model| {
+                    model.account_id == account.account_id
+                        && crate::routing::canonical_provider_id(&model.provider)
+                            == crate::routing::canonical_provider_id(&account.provider)
+                        && model.rate_group == account.rate_group
+                })
+            })
             .collect();
         models.sort_by(|a, b| {
             a.rate_group

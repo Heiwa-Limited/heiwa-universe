@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+heiwa-core = { path = "../../apps/heiwa_core" }
 heiwa_config = { path = "../heiwa_config" }
 async-trait = "0.1"
 heiwa-provider = { path = "../heiwa_provider" }

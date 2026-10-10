@@ -16,7 +16,7 @@ use heiwa_protocol::{
     PrincipalKind, RiskClass, RoutingState, SessionPrincipal, SessionState, ToolCallReceipt,
     ToolLease, TranscriptBlock,
 };
-use heiwa_provider::adapter::{Message, ProviderAdapter, Role, TokenUsage};
+use heiwa_provider::adapter::{Message, Role, TokenUsage};
 use heiwa_repl::{parse_input, render_footer, ReplCommand, TelemetryState};
 use heiwa_shell::agentic;
 use heiwa_shell::model_calls::{
@@ -1449,27 +1449,11 @@ pub(crate) fn get_live_model_tiers_with(
 }
 
 fn live_model_identity(model: &heiwa_provider::DetectedModel) -> String {
-    format!(
-        "{}|{}|{}|{}|{}",
-        canonical_provider_id(&model.provider),
-        model.model_id,
-        model.provider_model_id,
-        model.account_id,
-        model.rate_group
-    )
+    heiwa_provider::routing::registry_model_identity(model)
 }
 
 fn stable_live_model_id(model: &heiwa_provider::DetectedModel) -> u64 {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in live_model_identity(model).bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    if hash == 0 {
-        1
-    } else {
-        hash
-    }
+    heiwa_provider::routing::registry_model_candidate_id(model)
 }
 
 /// Local evidence appender: JSONL truth with derived Lance recall.
@@ -3282,15 +3266,6 @@ pub(crate) fn privacy_for_task(task: &str) -> &'static str {
     }
 }
 
-/// Resolve a provider adapter by name.
-///
-/// Selection itself lives in `heiwa_provider::routing` so every surface —
-/// this CLI, the desktop runtime, and the fresh-install harness — resolves a
-/// provider the same way.
-fn resolve_adapter(provider: &str, model_id: &str) -> Result<Arc<dyn ProviderAdapter>, String> {
-    heiwa_provider::routing::resolve_adapter(provider, model_id)
-}
-
 fn model_call_candidate(tier: &heiwa_protocol::ModelTier) -> ModelCallCandidate {
     let on_device = matches!(tier.provider.as_str(), "ollama" | "local")
         && matches!(tier.rate_group.as_str(), "local" | "local_ollama");
@@ -3339,9 +3314,7 @@ fn default_model_call_runtime() -> Result<DefaultModelCallRuntime, String> {
                 )
                 .map_err(|error| error.to_string())?,
             ));
-            let resolver =
-                Arc::new(|provider: &str, model: &str| resolve_adapter(provider, model).ok());
-            let executor = Arc::new(ModelCallExecutor::new(resolver, sessions.clone()));
+            let executor = Arc::new(ModelCallExecutor::new_registry(sessions.clone()));
             let mut runner = OperatorTurnRunner::new(sessions.clone(), executor.clone());
             // Shadow System 1 judgment is off unless `[system1] shadow` asks
             // for it, and it never changes execution. A bad setting disables
@@ -5160,7 +5133,7 @@ mod tests {
                     cost_per_1k_input: 0.003,
                     cost_per_1k_output: 0.015,
                     price_truth: heiwa_provider::PriceTruth::Known,
-                    inventory_truth: heiwa_provider::InventoryTruth::Inferred,
+                    inventory_truth: heiwa_provider::InventoryTruth::Verified,
                 }],
             }]);
 

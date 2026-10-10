@@ -15,7 +15,7 @@
 //!   - L3 CLI smoke              -> `apps/heiwa_shell/tests/smoke.rs`
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use heiwa_core::drex::{default_policy, plan_route, DrexIngress};
 use heiwa_protocol::ModelTier;
@@ -243,7 +243,11 @@ fn tier(
 }
 
 fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drex_golden/l2")
+    // Cargo sets the current package directory when running tests; cached
+    // artifacts may have been compiled in a checkout that no longer exists.
+    std::env::current_dir()
+        .expect("current package directory")
+        .join("tests/fixtures/drex_golden/l2")
 }
 
 fn parse_mode(routing_metadata: &str) -> Option<String> {

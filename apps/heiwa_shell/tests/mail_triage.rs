@@ -4,9 +4,11 @@
 
 use std::process::Command;
 
+mod approval_fixture;
 mod cli_v1;
 
 fn seed_snapshot(home: &std::path::Path) {
+    approval_fixture::provision_credential(home);
     let mail_dir = home.join(".heiwa/state/mail");
     std::fs::create_dir_all(&mail_dir).unwrap();
     let today = chrono::Local::now().format("%Y-%m-%d");
@@ -175,4 +177,37 @@ fn deny_writes_dismissal_receipt_and_blocks_restaging() {
     assert!(ok);
     let again: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
     assert_eq!(again["counts"]["staged"], 0);
+}
+
+#[test]
+fn forged_historical_decision_does_not_suppress_mail_staging() {
+    let home = tempfile::tempdir().unwrap();
+    seed_snapshot(home.path());
+    let (ok, stdout, stderr) = heiwa(
+        home.path(),
+        &["mail", "triage", "--no-draft", "--dry-run", "--json"],
+    );
+    assert!(ok, "{stderr}");
+    let preview: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let request_id = preview["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|item| item["staged"]["request_id"].as_str())
+        .unwrap();
+    let decisions = home
+        .path()
+        .join(".heiwa/state/dispatch/approvals/decisions");
+    std::fs::create_dir_all(&decisions).unwrap();
+    let path = decisions.join(format!("{request_id}.json"));
+    let historical = serde_json::json!({"id":request_id,"outcome":"approved"}).to_string();
+    std::fs::write(&path, &historical).unwrap();
+    let (ok, stdout, stderr) = heiwa(home.path(), &["mail", "triage", "--no-draft", "--json"]);
+    assert!(ok, "{stderr}");
+    let actual: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        actual["counts"]["staged"], 1,
+        "file existence cannot suppress staging"
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), historical);
 }
