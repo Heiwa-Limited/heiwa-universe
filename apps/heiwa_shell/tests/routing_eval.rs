@@ -141,11 +141,13 @@ fn local_candidate(provider: &str, model: &str) -> ModelCallCandidate {
 
 /// The checkout the harness ran from, and whether it had tracked changes.
 fn revision() -> Value {
-    let dir = env!("CARGO_MANIFEST_DIR");
+    // Bind the receipt to the checkout Cargo is testing, not an artifact
+    // cache's former build-time location.
+    let dir = std::env::current_dir().expect("current package directory");
     let git = |args: &[&str]| {
         std::process::Command::new("git")
             .arg("-C")
-            .arg(dir)
+            .arg(&dir)
             .args(args)
             .output()
             .ok()

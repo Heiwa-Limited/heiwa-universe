@@ -25,7 +25,9 @@ use std::fs;
 use std::path::PathBuf;
 
 fn manifest_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    // Inspect the package being tested, even when Cargo reuses an artifact
+    // compiled in another checkout.
+    std::env::current_dir().expect("current package directory")
 }
 
 /// Pulls the comma-separated contents out of the first `open`..`close`
