@@ -409,6 +409,7 @@ jobs:
           bash scripts/check_public_installer.sh
           bash scripts/tests/test_local_python_resolution.sh
           bash scripts/tests/test_release_workflow_source.sh
+          python3 -m unittest discover -s scripts/tests -p test_github_delivery.py
           bash scripts/tests/test_ci_required_checks.sh
           bash scripts/tests/test_acceptance_stamp.sh
           bats tests/audit/*.bats
