@@ -11,6 +11,7 @@ use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -74,12 +75,21 @@ impl Drop for ChildGuard {
     }
 }
 
-fn available_port() -> u16 {
-    TcpListener::bind(("127.0.0.1", 0))
+fn available_port() -> (u16, MutexGuard<'static, ()>) {
+    // Keep allocation-to-bind exclusive among these test cases, and bound
+    // concurrent fresh Lance initialization. A parallel full gate timed out
+    // waiting for a runtime; only startup is serialized. API cases still
+    // run concurrently once their own isolated runtime is ready.
+    static STARTUP: Mutex<()> = Mutex::new(());
+    let startup = STARTUP
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let port = TcpListener::bind(("127.0.0.1", 0))
         .expect("bind ephemeral port")
         .local_addr()
         .expect("ephemeral address")
-        .port()
+        .port();
+    (port, startup)
 }
 
 /// Wait until the runtime can actually serve a request.
@@ -257,18 +267,19 @@ fn background_runtime_falls_back_to_calendar_app_discovery_when_eventkit_helper_
     let fixture = Fixture::new();
     fixture.connect_apple_calendar_cli();
     let helper = fixture_failing_eventkit_helper(fixture._root.path());
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = fixture
         .heiwa()
         .env("HEIWA_APPLE_RESOURCES_HELPER", &helper)
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
 
     let resources = response_json(&get(port, "/api/v1/calendar/resources"));
     assert_eq!(resources["data"]["status"], "ready");
@@ -283,17 +294,18 @@ fn background_runtime_falls_back_to_calendar_app_discovery_when_eventkit_helper_
 fn stranger_app_keeps_apple_calendar_private_until_this_profile_connects_it() {
     let fixture = Fixture::new();
     fixture.establish_local_identity();
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = fixture
         .heiwa()
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
 
     let before = response_json(&get(port, "/api/v1/calendar/resources"));
     assert_eq!(before["data"]["status"], "disconnected");
@@ -360,17 +372,18 @@ fn stranger_app_keeps_apple_calendar_private_until_this_profile_connects_it() {
 fn authenticated_app_approval_endpoint_executes_the_existing_connector_effect() {
     let fixture = Fixture::new();
     fixture.establish_local_identity();
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = fixture
         .heiwa()
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
 
     let connected = post_json(
         port,
@@ -702,17 +715,18 @@ fn approval_executes_apple_write_and_replays_connector_receipt() {
 fn authenticated_app_hold_endpoint_stages_named_apple_promotion() {
     let fixture = Fixture::new();
     fixture.establish_local_identity();
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = fixture
         .heiwa()
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
 
     let connected = post_json(
         port,
@@ -893,16 +907,17 @@ print(json.dumps({'schema_version': 1, 'calendars': json.load(open(os.environ['F
     let snapshot = state.join("events.jsonl");
     let prior_events = "{\"id\":\"existing-local-event\"}\n";
     fs::write(&snapshot, prior_events).unwrap();
-    let port = available_port();
+    let (port, startup) = available_port();
     let _child = ChildGuard(
         command()
             .args(["app", "start", "--port", &port.to_string(), "--no-open"])
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::inherit())
             .spawn()
             .unwrap(),
     );
     wait_for_runtime(port);
+    drop(startup);
     let resources = response_json(&get(port, "/api/v1/calendar/resources"));
     let revision = resources["data"]["catalog_revision"]
         .as_str()
@@ -1136,16 +1151,17 @@ fn live_sync_reads_past_one_reader_page_and_serves_local_days() {
     events.retain(|event| event["external_id"] != "next-month");
     fs::write(&source, serde_json::Value::from(events).to_string()).unwrap();
 
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = command()
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .expect("start temporary runtime");
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
 
     let synced = response_json(&post_json(
         port,
@@ -1276,18 +1292,19 @@ fn http_decision_authority_rejects_user_jwt_and_mismatched_runtime_key() {
     let fixture = Fixture::new();
     fixture.establish_local_identity();
     let (request_id, hold_id) = stage(&fixture);
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = fixture
         .heiwa()
         .env("HEIWA_MACHINE_AUTH_TOKEN", "apple-connector-test-token")
         .env("HEIWA_JWT_SIGNING_SECRET", JWT_KEY)
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .unwrap();
     let child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
     let now = chrono::Utc::now().timestamp();
     let claims = heiwa_core::auth::AuthClaims {
         sub: "test-user".into(),
@@ -1331,18 +1348,19 @@ fn http_decision_authority_rejects_user_jwt_and_mismatched_runtime_key() {
     drop(child);
 
     let (request_id, hold_id) = stage(&fixture);
-    let port = available_port();
+    let (port, startup) = available_port();
     let child = fixture
         .heiwa()
         .env("HEIWA_MACHINE_AUTH_TOKEN", "runtime-env-override")
         .env("HEIWA_JWT_SIGNING_SECRET", JWT_KEY)
         .args(["app", "start", "--port", &port.to_string(), "--no-open"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
         .unwrap();
     let _child = ChildGuard(child);
     wait_for_runtime(port);
+    drop(startup);
     assert!(
         request(port, "GET", "/api/v1/approvals", "runtime-env-override")
             .starts_with("HTTP/1.1 200")
