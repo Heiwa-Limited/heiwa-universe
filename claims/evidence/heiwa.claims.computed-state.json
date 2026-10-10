@@ -4,9 +4,9 @@
   "verifier_id": "cargo-test",
   "verifier_version": "3",
   "result": "pass",
-  "commit": "9081bcdb8d9f75f2a9e8603b65223c821f90500c",
-  "scope_digest": "30ecd883cfb07e595c2439068076776c5e2625acbd86fa099e221a24174780a0",
-  "verified_at": 1791502462,
+  "commit": "2bb807bcb11c48c33fe9ab411f888b59b8f59c0c",
+  "scope_digest": "ba9eaaecc1ed9ab54d4fa26d4ba0bae23b52031e0b8c33ac169a94c974e6db3e",
+  "verified_at": 1791659199,
   "environment": {
     "os": "macos",
     "arch": "aarch64"
