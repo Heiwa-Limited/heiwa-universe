@@ -175,7 +175,8 @@ describe("Calendar selection acknowledgements", () => {
     await state.loadCalendarResources();
     await state.selectAppleCalendars(["life"]);
     expect(state.calendarResources()?.selected_ids).toEqual(["work"]);
-    expect(state.calendarSelection()).toEqual({ ids: ["life"], saving: false, error: "Disk full" });
+    expect(state.calendarSelection()).toEqual({ ids: ["life"], saving: false,
+      error: "Calendar choices could not be saved. Refresh the calendar list and retry." });
     await expect(state.readAppleCalendars(["life"])).rejects.toThrow("Save calendar choices");
     expect(post).toHaveBeenCalledOnce();
     await state.selectAppleCalendars(["life"]);

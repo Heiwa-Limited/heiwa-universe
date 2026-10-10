@@ -102,13 +102,61 @@ it("shows a failed selection as unsaved and permits retry before importing", asy
     .mockResolvedValueOnce({ data: { selected_ids: ["work"], catalog_revision: "catalog-1" } });
   mount({ post, resources: { source: "apple_calendar", status: "ready", reader_available: true, catalog_revision: "catalog-1", selected_ids: [], calendars: [{ id: "work", name: "Work", writable: true }] } });
   fireEvent.click(await screen.findByRole("checkbox", { name: "Work" }));
-  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Disk is full"));
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Calendar choices could not be saved. Refresh the calendar list and retry."));
   expect((screen.getByRole("button", { name: "Sync selected calendars" }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText("Choices not saved.")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Retry saving choices" }));
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   expect((screen.getByRole("button", { name: "Sync selected calendars" }) as HTMLButtonElement).disabled).toBe(false);
   expect(post).toHaveBeenCalledTimes(2);
+});
+
+it("keeps native selection failures useful and private without acknowledging unsaved choices", async () => {
+  const privateDetail = "private EventKit account and /private/helper-path";
+  const post = vi.fn().mockRejectedValueOnce({ kind: "Http", detail: { status: 400, body: privateDetail } })
+    .mockResolvedValueOnce({ data: { selected_ids: ["work", "life"], catalog_revision: "catalog-1" } });
+  const { state } = mount({ post, resources: {
+    source: "apple_calendar", status: "ready", reader_available: true,
+    catalog_revision: "catalog-1", selected_ids: ["work"],
+    calendars: ["work", "life"].map((id) => ({ id, name: id, writable: true })),
+  } });
+  fireEvent.click(await screen.findByRole("checkbox", { name: "life" }));
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Calendar choices could not be saved. Refresh the calendar list and retry."));
+  const error = screen.getByRole("alert").textContent;
+  expect(error).not.toContain("[object Object]");
+  expect(error).not.toContain(privateDetail);
+  expect(state.runtime.calendarResources()?.selected_ids).toEqual(["work"]);
+  expect((screen.getByRole("checkbox", { name: "life" }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole("button", { name: "Sync selected calendars" }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Retry saving choices" }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(state.runtime.calendarResources()?.selected_ids).toEqual(["work", "life"]);
+  expect(post).toHaveBeenCalledTimes(2);
+});
+
+it("shows a safe retry message for a native sync failure and preserves acknowledged choices and events", async () => {
+  const privateDetail = "private EventKit account and /private/helper-path";
+  const post = vi.fn().mockRejectedValue({ kind: "Http", detail: { status: 400, body: privateDetail } });
+  const { state } = mount({ post,
+    events: [{ id: "existing", title: "Existing meeting", date: localIsoDate(), all_day: true }],
+    resources: { source: "apple_calendar", status: "ready", reader_available: true,
+      catalog_revision: "catalog-1", selected_ids: ["work"],
+      calendars: [{ id: "work", name: "Work", writable: true }] },
+  });
+  const read = await screen.findByRole("button", { name: "Sync selected calendars" });
+  await waitFor(() => expect(screen.getByText("Existing meeting")).toBeTruthy());
+  fireEvent.click(read);
+  await waitFor(() => expect(screen.getByText("Calendar events could not be synced. Your saved choices and existing events were kept. Try again.")).toBeTruthy());
+  const error = screen.getByRole("alert").textContent;
+  expect(error).not.toContain("[object Object]");
+  expect(error).not.toContain(privateDetail);
+  expect(state.runtime.calendarResources()?.selected_ids).toEqual(["work"]);
+  expect(state.runtime.calendarSelection()).toBeNull();
+  expect(screen.getByText("Existing meeting")).toBeTruthy();
+  expect((read as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(read);
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+  expect(post).toHaveBeenLastCalledWith("/api/v1/calendar/read", { calendar_ids: ["work"] });
 });
 
 function agenda(): HTMLElement {

@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, untrack } from "solid-js";
 import { localIsoDate, parseLocalDate } from "../../lib/format";
+import { runtimeErrorMessage } from "../../runtime";
 import { useApp } from "../../state/app";
 import {
   addIsoDays,
@@ -449,7 +450,7 @@ function ConnectionPanel() {
       await app.runtime.connectAppleCalendar();
       await app.runtime.syncCalendar({ force: true });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(runtimeErrorMessage(cause, "Apple Calendar could not be connected. Try again."));
     } finally {
       setBusy(false);
     }
@@ -470,7 +471,7 @@ function ConnectionPanel() {
       >
         Connect Apple Calendar
       </button>
-      <Show when={error()}>{(message) => <p class="surface-error">{message()}</p>}</Show>
+      <Show when={error()}>{(message) => <p class="surface-error" role="alert">{message()}</p>}</Show>
     </section>
   );
 }
@@ -523,7 +524,7 @@ function CalendarSettings() {
         ? `${result.fetched} events synced from ${from}. Part of the range could not be read, so events Heiwa did not see were kept.`
         : `${result.fetched} events synced from ${from}. Heiwa keeps them current while it runs.`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(runtimeErrorMessage(cause, "Calendar events could not be synced. Your saved choices and existing events were kept. Try again."));
     } finally {
       setReadBusy(false);
     }
@@ -536,7 +537,7 @@ function CalendarSettings() {
     try {
       await app.runtime.disconnectAppleCalendar();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(runtimeErrorMessage(cause, "Apple Calendar could not be disconnected. Check its connection and try again."));
     } finally {
       setDisconnecting(false);
     }
@@ -587,7 +588,7 @@ function CalendarSettings() {
         </div>
       </Show>
       <Show when={notice()}><p class="quiet" role="status">{notice()}</p></Show>
-      <Show when={error()}>{(message) => <p class="surface-error">{message()}</p>}</Show>
+      <Show when={error()}>{(message) => <p class="surface-error" role="alert">{message()}</p>}</Show>
       <div class="cal-settings-footer">
         <button class="small-action" disabled={disconnecting() || readBusy() || pending()?.saving} onClick={() => void disconnect()}>
           Disconnect Apple Calendar
@@ -641,7 +642,7 @@ function StageEventForm() {
       setTitle("");
       setNotice("Staged locally. Review the pending decision before Apple Calendar changes.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(runtimeErrorMessage(cause, "The event could not be staged. Review pending changes before retrying."));
     } finally {
       setBusy(false);
     }
@@ -682,7 +683,7 @@ function StageEventForm() {
         </label>
       </div>
       <div class="cal-stage-actions">
-        <Show when={error()}>{(message) => <p class="surface-error">{message()}</p>}</Show>
+        <Show when={error()}>{(message) => <p class="surface-error" role="alert">{message()}</p>}</Show>
         <Show when={notice()}>{(message) => <p class="quiet">{message()}</p>}</Show>
         <Show when={notice() || (app.runtime.approvals()?.pending?.length ?? 0) > 0}>
           <button type="button" class="small-action" onClick={() => app.navigate("approvals")}>Review pending changes</button>

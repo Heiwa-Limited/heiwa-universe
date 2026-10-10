@@ -15,6 +15,28 @@ export type ApiErrorPayload =
   | { kind: "InvalidPath"; detail: string }
   | { kind: "AuthNotConfigured" };
 
+/** A fixed, locally authored instruction that is safe to show in the app. */
+export class RuntimeActionError extends Error {}
+
+/** Native errors can contain private paths or response bodies; never display their detail. */
+export function runtimeErrorMessage(cause: unknown, fallback: string): string {
+  if (cause instanceof RuntimeActionError) return cause.message;
+  if (cause !== null && typeof cause === "object" && "kind" in cause) {
+    if (cause.kind === "Offline") {
+      return "The Heiwa runtime is unavailable. Check the connection and try again.";
+    }
+    const status = cause.kind === "Http" && "detail" in cause && cause.detail !== null
+      && typeof cause.detail === "object" && "status" in cause.detail ? cause.detail.status : undefined;
+    if (cause.kind === "AuthNotConfigured" || status === 401) {
+      return "Heiwa could not authenticate with its local runtime. Check the connection and try again.";
+    }
+    if (status === 403) {
+      return "The Heiwa runtime denied access to this action. Check the connection and try again.";
+    }
+  }
+  return fallback;
+}
+
 export type RuntimeHealth = {
   reachable: boolean;
   snapshot?: RuntimeSnapshotEnvelope | null;

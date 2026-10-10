@@ -3,6 +3,8 @@ import {
   apiGet,
   apiPost,
   readAppleMail,
+  RuntimeActionError,
+  runtimeErrorMessage,
   runtimeHealth,
   type AppleMailScanResult,
   type RuntimeHealth,
@@ -255,14 +257,14 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
         const requested = [...calendarSelection()!.ids];
         try {
           const revision = calendarResources()?.catalog_revision;
-          if (!revision) throw new Error("Refresh the calendar list before saving choices.");
+          if (!revision) throw new RuntimeActionError("Refresh the calendar list before saving choices.");
           const response = await post<{ data: { selected_ids: string[]; catalog_revision: string } }>(
             "/api/v1/calendar/select", { calendar_ids: requested, catalog_revision: revision },
           );
           const ack = response.data;
           if (ack?.catalog_revision !== revision || !Array.isArray(ack?.selected_ids)
               || JSON.stringify(ack.selected_ids) !== JSON.stringify(requested)) {
-            throw new Error("The runtime did not acknowledge these calendar choices. Refresh and retry.");
+            throw new RuntimeActionError("The runtime did not acknowledge these calendar choices. Refresh and retry.");
           }
           ++selectionEpoch;
           setCalendarResources((previous) => previous && ({ ...previous, selected_ids: [...ack.selected_ids] }));
@@ -270,7 +272,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
         } catch (cause) {
           if (intent === selectionIntent) {
             setCalendarSelection({ ids: requested, saving: false,
-              error: cause instanceof Error ? cause.message : String(cause) });
+              error: runtimeErrorMessage(cause, "Calendar choices could not be saved. Refresh the calendar list and retry.") });
           }
         }
       }
@@ -286,7 +288,7 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
   async function readAppleCalendars(ids: string[]): Promise<{ fetched: number; truncated: boolean }> {
     const saved = calendarResources()?.selected_ids ?? [];
     if (calendarSelection() || !ids.length || JSON.stringify(ids) !== JSON.stringify(saved)) {
-      throw new Error("Save calendar choices before syncing events.");
+      throw new RuntimeActionError("Save calendar choices before syncing events.");
     }
     const response = await post<{ data: { fetched: number; truncated: boolean } }>("/api/v1/calendar/read", { calendar_ids: ids });
     await Promise.all([loadCalendar(), loadCalendarResources()]);
