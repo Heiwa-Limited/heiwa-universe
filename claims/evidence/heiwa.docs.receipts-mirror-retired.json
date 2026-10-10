@@ -4,9 +4,9 @@
   "verifier_id": "text-absent",
   "verifier_version": "3",
   "result": "pass",
-  "commit": "21e4c9e59b8270bd55a91e80872bbac476f60bc3",
+  "commit": "2bb807bcb11c48c33fe9ab411f888b59b8f59c0c",
   "scope_digest": "b2b0ad25f9009d38e1011a185d052e750317300cd555e8221e9b314f3461355f",
-  "verified_at": 1790562578,
+  "verified_at": 1791659199,
   "environment": {
     "os": "macos",
     "arch": "aarch64"

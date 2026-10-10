@@ -138,8 +138,20 @@ allows time for propagation.
 4. Dispatch `release.yml` from `main` with its `tag` input set to that existing
    tag. For example, replace `vX.Y.Z` in
    `gh workflow run release.yml --ref main -f tag=vX.Y.Z -f macos_signing=ad-hoc`.
-   `scripts/ship_release.sh <pr> <version>` runs steps 1–5 end to end from a
-   reviewed pull request into `dev`, stopping at the first failed gate.
+   `scripts/ship_release.sh <pr> <version> <verified-head-sha> [developer-id|ad-hoc]`
+   runs steps 1–5 from a clean checkout at the reviewed PR head. Required local
+   experimental gates, meaningful value and applicable on-device bundle proof
+   remain operator prerequisites; the script does not produce them. After the
+   first merge it runs the full default local gate on freshly fetched, clean
+   exact `dev` in a disposable clone before opening a promotion. Receipts/logs
+   survive under `private/verification/ship-release/`; a failed gate stops there.
+   It never updates a PR branch
+   silently. Each merge rereads required checks, all review-thread pages and
+   merge state, then binds the merge to the supplied head. A changed head requires
+   renewed verification. Workflow dispatches use their returned run URL and check
+   its workflow and exact `main` revision; missing run identity stops delivery
+   without selecting a previous or concurrent run. Use a GitHub CLI version that
+   returns dispatch URLs, or inspect a stopped dispatch manually.
 5. Wait for the entire release workflow, including public-install smoke and
    container packaging after publication. Release assets can already exist
    when a downstream check fails; their presence alone is not readiness.

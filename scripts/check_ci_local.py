@@ -216,6 +216,8 @@ def check_inventory(root: Path, *, full: bool, python: str) -> list[Check]:
     add("local Python resolver", "bash", "scripts/tests/test_local_python_resolution.sh")
     add("Justfile Python override", "bash", "scripts/tests/test_just_python_override.sh")
     add("release source regression", "bash", "scripts/tests/test_release_workflow_source.sh")
+    add("protected delivery regression", python, "-m", "unittest", "discover",
+        "-s", "scripts/tests", "-p", "test_github_delivery.py")
     add("required CI results regression", "bash", "scripts/tests/test_ci_required_checks.sh")
     add("claim gate portability", "bash", "scripts/tests/test_check_claims.sh")
     add("claim registry", "bash", "scripts/check_claims.sh")
