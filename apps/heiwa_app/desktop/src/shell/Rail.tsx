@@ -5,9 +5,9 @@ import { Icon } from "./Icon";
 import { CreateProjectControl, ProjectActions, SessionActions } from "./SessionControls";
 
 const NAV: Array<{
-  id: "home" | "sessions" | "work" | "calendar" | "mail" | "reminders";
+  id: "home" | "sessions" | "work" | "calendar" | "mail" | "reminders" | "files";
   label: string;
-  icon: "home" | "sessions" | "work" | "calendar" | "mail" | "reminders";
+  icon: "home" | "sessions" | "work" | "calendar" | "mail" | "reminders" | "folder";
 }> = [
   { id: "home", label: "Home", icon: "home" },
   { id: "sessions", label: "All sessions", icon: "sessions" },
@@ -15,6 +15,7 @@ const NAV: Array<{
   { id: "calendar", label: "Calendar", icon: "calendar" },
   { id: "mail", label: "Mail", icon: "mail" },
   { id: "reminders", label: "Reminders", icon: "reminders" },
+  { id: "files", label: "Files", icon: "folder" },
 ];
 
 export function Rail(props: { onNavigate: (surface: SurfaceModule) => void; onResources?: () => void }) {

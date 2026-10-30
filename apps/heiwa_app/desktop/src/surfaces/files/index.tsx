@@ -27,9 +27,9 @@ function FilesSurface() {
   createEffect(() => { void load(endpoint()); });
   onCleanup(() => { generation += 1; });
   const choose = async () => {
-    const path = endpoint(); if (!path || choosing()) return;
+    const threadId = app.sessions.selectedId(); if (!threadId || choosing()) return;
     setChoosing(true); setError(undefined);
-    try { await apiPost(path, {}); await load(); }
+    try { await apiPost(`/api/v1/operator/threads/${encodeURIComponent(threadId)}/workspace`, {}); await load(); }
     catch { setError("The folder could not be selected. Check that Heiwa setup is complete and try again."); }
     finally { setChoosing(false); }
   };

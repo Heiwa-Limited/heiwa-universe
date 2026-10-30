@@ -87,7 +87,8 @@ export function createOperatorState(options: OperatorStateOptions = {}): Operato
     reconnect: () => client.reconnect(),
     cancel: async (turnId) => {
       if (!store.snapshot().turns.some((turn) => turn.turnId === turnId)) throw new Error("unknown_operator_turn");
-      await (options.cancel ?? apiPost)(`/api/v1/operator/turns/${encodeURIComponent(turnId)}/cancel`, {});
+      if (options.cancel) await options.cancel(`/api/v1/operator/turns/${encodeURIComponent(turnId)}/cancel`, {});
+      else await apiPost(`/api/v1/operator/turns/${encodeURIComponent(turnId)}/cancel`, {});
       publish();
     },
     submit: async (prompt, policy) => {

@@ -364,7 +364,7 @@ describe("shell", () => {
     const { state } = harness();
     render(() => <App state={state} />);
     const labels = [...document.querySelectorAll<HTMLButtonElement>(".sidebar-navlist button")].map((button) => button.textContent);
-    expect(labels).toEqual(["Home", "All sessions", "Work", "Calendar", "Mail", "Reminders"]);
+    expect(labels).toEqual(["Home", "All sessions", "Work", "Calendar", "Mail", "Reminders", "Files"]);
   });
 
   it.each(SURFACES.map((surface) => surface.id))("mounts the %s surface", (id) => {

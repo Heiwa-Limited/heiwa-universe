@@ -260,6 +260,14 @@ const ALLOWED_POST_ID_PATTERNS: &[AllowedPostIdRoute] = &[
         suffix: "/turns",
     },
     AllowedPostIdRoute {
+        prefix: "/api/v1/operator/threads/",
+        suffix: "/workspace",
+    },
+    AllowedPostIdRoute {
+        prefix: "/api/v1/operator/turns/",
+        suffix: "/cancel",
+    },
+    AllowedPostIdRoute {
         prefix: "/api/v1/operator/projects/",
         suffix: "/metadata",
     },
@@ -964,6 +972,10 @@ mod tests {
             "/api/v1/operator/threads/thread-1/metadata"
         ));
         assert!(post_path_allowed("/api/v1/operator/threads/thread-1/turns"));
+        assert!(post_path_allowed(
+            "/api/v1/operator/threads/thread-1/workspace"
+        ));
+        assert!(post_path_allowed("/api/v1/operator/turns/turn-1/cancel"));
         assert!(post_path_allowed(
             "/api/v1/operator/projects/proj-1/metadata"
         ));

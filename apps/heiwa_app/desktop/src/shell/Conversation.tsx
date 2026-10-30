@@ -85,7 +85,7 @@ export function Conversation(props: { compact?: boolean }) {
               <div class="chat-msg-header">
                 <span class="chat-role">{message().role}</span>
                 <span class="chat-meta">
-                  {[message().provider, message().model].filter(Boolean).join("/") ||
+                  {(message().model?.startsWith(`${message().provider}/`) ? message().model : [message().provider, message().model].filter(Boolean).join("/")) ||
                     (message().receiptRef ? "receipt linked" : "")}
                 </span>
                 <span class="chat-time">{timeFmt(Date.parse(message().occurredAt))}</span>

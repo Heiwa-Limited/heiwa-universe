@@ -22,6 +22,7 @@
     "allow-complete-workspace-setup",
     "allow-open-resource-guide",
     "allow-connect-api-provider",
+    "allow-connect-codex-subscription",
     "allow-verify-api-provider",
     "allow-disconnect-api-provider",
     "allow-operator-subscribe",
