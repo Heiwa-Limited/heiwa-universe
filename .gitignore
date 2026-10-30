@@ -1,160 +1,50 @@
-# Environments
-.env
-.env.*
-!.env.example
-.venv
-venv/
-ENV/
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-node_modules/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-!scripts/lib/
-!scripts/lib/**
-!apps/heiwa_app/clients/cockpit/src/lib/
-!apps/heiwa_app/clients/cockpit/src/lib/**
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Testing
-.pytest_cache/
-.tox/
-.coverage
-.coverage.*
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+node_modules
+.bun
+.turbo
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Logs
-runtime/logs/
 *.log
-site/
+*.tsbuildinfo
+apps/*/dist
+apps/*/dist-exe
+infra/*/dist
+.astro
+packages/*/dist
+.env
+.env.local
+build/
+.logs/
+release/
+release-mock/
+.t3
+.idea/
+apps/web/.playwright
+apps/web/playwright-report
+apps/web/src/components/__screenshots__
+.vitest-*
+__screenshots__/
+.tanstack
+squashfs-root/
+.vercel
+.gstack/
+.plans/
+/audits/
+dist-electron/
+.electron-runtime/
+.showcase/
+apps/mobile/.showcase/
+apps/mobile/.generated/
+apps/mobile/.android-cache/
+/.generated/
+artifacts/app-store/screenshots/
+artifacts/mobile-e2e/
+artifacts/mobile-behavior/
+.github/pr-assets/
+native/**/target/
+node_modules/
+.alchemy/
+*.log
+.env*
+!.env.example
 
-# Databases
-*.db
-*.sqlite
-
-# Terraform
-.terraform/
-*.tfstate
-*.tfstate.*
-
-# Wrangler
-.wrangler/
-docs_and_deps/
-
-# Rust
-target/
-/target
-**/*.rs.bk
-Cargo.lock
-
-# Memory / scratch
-memory/
-repos/
-/vendor/
-
-# Root-level local context files (not repo artifacts)
-/HEARTBEAT.md
-/TOOLS.md
-/USER.md
-
-# Secrets & credentials (defense in depth)
-*.pem
-*.key
-*.p12
-*.pfx
-*credentials*.json
-*secret*.json
-auth.json
-oauth_creds.json
-*.keystore
-
-# Claude Code — allow team settings + agents, ignore local
-.claude/*
-!.claude/settings.json
-!.claude/commands/
-!.claude/commands/**
-!.claude/agents/
-!.claude/agents/**
-
-# Codex — override global gitignore, allow project config
-!.codex/
-.codex/*
-!.codex/config.toml
-
-# Grok — allow project config, ignore local state
-.grok/*
-!.grok/config.toml
-
-# Gemini CLI — allow project config + agents, ignore local state
-.gemini/*
-!.gemini/settings.json
-!.gemini/policies/
-!.gemini/policies/**
-!.gemini/agents/
-!.gemini/agents/**
-
-# Ollama — model manifest for boost nodes
-!.ollama/
-.ollama/*
-!.ollama/models.json
-
-# Standalone apps (live outside monorepo)
-apps/heiwa_dj/
-
-# Heiwa desktop package (repo source). Overrides user-global `Desktop/` ignore.
-!apps/heiwa_app/desktop/
-!apps/heiwa_app/desktop/**
-apps/heiwa_app/desktop/node_modules/
-apps/heiwa_app/desktop/dist/
-apps/heiwa_app/desktop/src-tauri/gen/
-apps/heiwa_app/desktop/src-tauri/target/
-
-# Windows/WSL artifacts
-**/D:\\cache\\cargo/
-**/*.bak
-.worktrees/
-apps/heiwa_trading/runtime/
-/heiwa-desk.app/
-
-# Local-only working material. GitHub carries product, distribution, and
-# marketing; company strategy and operator-private notes stay on this machine.
-private/
+# pnpm content-addressable store; never belongs in the repo.
+.pnpm-store/

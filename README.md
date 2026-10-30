@@ -1,154 +1,152 @@
-# Heiwa
+# T3 Code
 
-[![CI](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/ci.yml/badge.svg)](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/ci.yml)
-[![Docs](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/pages.yml/badge.svg)](https://github.com/Heiwa-Limited/heiwa-universe/actions/workflows/pages.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
 
-Heiwa is a local-first chat and work application for macOS 27, with a bundled `heiwa` CLI. Conversations, projects, connected resources, and inference providers share one local Rust runtime. Each user connects their own accounts and data.
+Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, and Google Antigravity. If they're set up on your computer, T3 Code can control them.
 
-## What Heiwa Does
+## "Wait, what are you selling me?"
 
-> Heiwa watches what matters, summarizes what changed, stages what needs action, executes what is safe, and proves what happened.
+Nothing. We built T3 Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
 
-Three planes compose one flow:
+We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
 
-- **Intake** — operator command bar and passive feeds (mail, calendar, messages, files, runtime alerts).
-- **Execution** — DREX routes work to local models, provider CLIs, tools, and connectors under leases and approval gates.
-- **Evidence** — every read or action emits a source-linked receipt into the local JSONL journal; Lance provides derived recall.
+## Installation
 
-Maturity is uneven across planes today; see [`HEIWA.md`](HEIWA.md#the-three-planes) for current vs target.
+> [!WARNING]
+> T3 Code currently supports Codex, Claude, Cursor, Grok Build, OpenCode, and Antigravity. Install and authenticate at least one provider before use:
+>
+> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
+> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
+> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
+> - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
+> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
+> - Antigravity: enable it in Settings, then use **Install Antigravity** and **Sign in with Google**. No CLI is required.
 
-## One-Sentence Truth
-
-`heiwa` is the installed product surface, DREX is the internal execution kernel, local JSONL is evidence truth, Lance is derived recall, and GitHub is source, CI, and distribution.
-
-## Current Repo Focus
-
-- Installed runtime: `apps/heiwa_shell/`
-- Core execution and routing: `apps/heiwa_core/`, `crates/heiwa_loop/`, `crates/heiwa_session/`
-- Provider normalization: `crates/heiwa_provider/`
-- Terminal UX: `crates/heiwa_tui/`, `crates/heiwa_repl/`
-- Evidence journal and recall: `crates/heiwa_evidence/`, `crates/heiwa_embed/`
-- GitHub distribution surfaces: Actions, Pages, and release metadata
-
-## Architecture
-
-| Layer              | Canonical meaning                                                 | Location                                        |
-| ------------------ | ----------------------------------------------------------------- | ----------------------------------------------- |
-| **Heiwa**          | Company and product identity                                      | Repo root                                       |
-| **`heiwa`**        | Primary installed runtime and operator surface                    | `apps/heiwa_shell/`                             |
-| **DREX**           | Internal execution kernel and routing substrate                   | `apps/heiwa_core/`                              |
-| **Local evidence** | Canonical JSONL journal plus derived Lance recall index           | `crates/heiwa_evidence/`, `crates/heiwa_embed/` |
-| **Rust runtime**   | Volatile execution: provider supervision and candidate generation | `crates/`                                       |
-
-> Rust proposes and executes, local text truth records, Lance recalls, `heiwa` presents.
-
-## Install
+### Command line
 
 ```bash
-curl -fsSL https://heiwa.ltd/install | sh
+curl -fsSL https://t3.codes/install.sh | sh
 ```
 
-The installer verifies a SHA-256 checksum from the release's `checksums.txt`
-before it moves anything into place, and refuses an archive containing links or
-unsupported entry types. It installs under `~/.heiwa` — set `HEIWA_HOME` to an
-absolute path to change that — and prints the exact binary, cockpit, and app
-paths it wrote.
+On Windows, in PowerShell:
+
+```powershell
+irm https://t3.codes/install.ps1 | iex
+```
+
+Then run `t3` to start the server and open the local web app. `t3 service install` keeps it running in the background, `t3 update` moves to a newer release, and `t3 --help` has the full reference.
+
+To try it once without installing, run `npx t3@latest` instead.
+
+### Desktop app
+
+Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+
+#### Windows (`winget`)
 
 ```bash
-export PATH="$HOME/.heiwa/bin:$PATH"
-heiwa doctor
-heiwa app start --no-open
+winget install T3Tools.T3Code
 ```
 
-Pin a version with `HEIWA_VERSION=0.3.0`. To read the script before running it,
-fetch it first: `curl -fsSL https://heiwa.ltd/install -o heiwa-install.sh`.
-
-What each platform gets today:
-
-| Platform | CLI | Desktop app | Source |
-| --- | --- | --- | --- |
-| macOS aarch64 | yes | yes, placed in `/Applications` (or `~/Applications`) | installer or [Releases](https://github.com/Heiwa-Limited/heiwa-universe/releases) |
-| Linux x86_64 | yes | not yet | installer or Releases |
-| Windows x86_64 | yes | not yet | [Releases](https://github.com/Heiwa-Limited/heiwa-universe/releases) archive |
-| Container | yes | not applicable | `ghcr.io/heiwa-limited/heiwa` |
-
-Current source targets macOS 27. Features on `main` may be newer than the latest
-published release; the [Releases page](https://github.com/Heiwa-Limited/heiwa-universe/releases)
-is the download authority. The current macOS 27 checkpoint is a development
-installation, not a newly published public release.
-
-macOS releases ship in one of two signing lanes. A **Developer ID** release
-is signed and notarized and also offers a browser-downloadable DMG. An
-**ad-hoc** release is signed without an Apple account and is delivered only by
-the installer: `curl` downloads are not quarantined, so Gatekeeper does not
-block the app it places. Browser-downloaded ad-hoc archives are quarantined;
-use the installer instead. With ad-hoc signing, macOS may ask again for
-Calendar, Reminders, or other privacy access after an update, because it
-cannot match the new build to the one you approved. Both lanes compare the
-bundled runtime with the released CLI.
-
-Opening the packaged app installs its matching CLI under the selected user's
-Heiwa directory. It needs no Rust, Node.js, or Python installation. Inside
-**Resources**, establish a workspace, connect supported API keys through the OS
-credential store, or use provider-owned CLI sign-in. Calendar lets you choose
-actual calendars and read a bounded window of existing events. Workspace setup,
-provider verification, and permission to read content are separate choices.
-
-Release archives carry build provenance attestations; the container image also
-carries an SBOM. Every published release is installed end-to-end on Linux and
-macOS by
-[`public-install-smoke.yml`](.github/workflows/public-install-smoke.yml) before
-the release workflow finishes.
-
-Updating:
+#### Windows (`scoop`)
 
 ```bash
-heiwa app update --dry-run --json   # show the plan
-heiwa app update                    # apply it
+scoop install extras/t3code
 ```
 
-Updates follow GitHub Releases, tagged on `main`. Contributors who want the
-integration branch can run `heiwa app channel dev` from their checkout; later
-updates then build and install `origin/dev`. Run `heiwa app channel main` to
-return to releases.
-
-## Build from Source
-
-For contributors. Requires the Rust toolchain in
-[`BUILD_MATRIX.md`](BUILD_MATRIX.md); this is not the install path.
+#### macOS (Homebrew)
 
 ```bash
-# Verify the local toolchain baseline
-bash scripts/check_runtime_baseline.sh
-
-# Build the installed runtime
-cargo build -p heiwa-shell
-
-# Run install and doctor
-cargo run -p heiwa-shell --bin heiwa -- install
-cargo run -p heiwa-shell --bin heiwa -- doctor
-
-# Inspect providers and auth state
-cargo run -p heiwa-shell --bin heiwa -- providers
-cargo run -p heiwa-shell --bin heiwa -- auth status
+brew install --cask t3-code
 ```
 
-## Platform Lane
+#### Debian, Ubuntu (`.deb`)
 
-- PR CI pairs a sub-minute feedback lane with a bounded Linux Rust test/Clippy lane; protected-main certification compiles macOS/Windows and certifies desktop, Lance, and security before release.
-- Docs publish through GitHub Pages on release tags.
-- Cargo manifests now carry shared package metadata for release readiness.
-- Release archives include the Apache-2.0 license and contributor materials.
-- Contributor, security, pull request, and issue templates live under `.github/` and `SECURITY.md`.
+Download the `.deb` from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), then:
 
-## Read First
+```bash
+sudo apt install ./T3-Code-*.deb
+```
 
-- [`HEIWA.md`](HEIWA.md)
-- [`docs/product-contract.md`](docs/product-contract.md)
-- [`docs/capability-fabric.md`](docs/capability-fabric.md)
-- [`docs/local-self-operation.md`](docs/local-self-operation.md)
-- [`AGENTS.md`](AGENTS.md)
-- [`BUILD_MATRIX.md`](BUILD_MATRIX.md)
-- [`SECURITY.md`](SECURITY.md)
-- [`docs/`](docs/)
+#### Arch Linux (AUR)
+
+Stable:
+
+```bash
+yay -S t3code-bin
+```
+
+Nightly:
+
+```bash
+yay -S t3code-nightly-bin
+```
+
+The AUR packaging is maintained in this repository under [`packaging/aur`](./packaging/aur).
+
+#### Nix (nixpkgs)
+
+```bash
+nix profile add github:NixOS/nixpkgs/nixos-unstable#t3code
+```
+
+The package is maintained in [nixpkgs](https://github.com/NixOS/nixpkgs/tree/nixos-unstable/pkgs/by-name/t3/t3code)
+and includes the desktop app (`t3code-desktop`) and the `t3` command.
+See [Nix installation](./docs/user/install.md#nix-nixpkgs) for NixOS configuration and updates.
+
+## Some notes
+
+We are very very early in this project. Expect bugs.
+
+We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
+
+## Documentation
+
+Full docs live in [docs/](./docs). There's no docs site yet.
+
+- [FAQ](./docs/user/faq.md)
+- [Install and first run](./docs/user/install.md)
+- [Permission modes](./docs/user/permission-modes.md)
+- [Keyboard shortcuts](./docs/user/keybindings.md)
+- [Project settings](./docs/user/project-settings.md)
+- [Appearance preferences](./docs/user/appearance.md)
+- [Remote access from a phone or another machine](./docs/user/remote-access.md)
+- [Connect Claude Code, Codex, ChatGPT and other agents over MCP](./docs/user/outside-agents.md)
+- [Keeping app and server in sync](./docs/user/updating.md)
+- [Source control integrations](./docs/user/source-control.md)
+- Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
+- [Run T3 Code as a background service](./docs/user/background-service.md)
+
+Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
+
+## If you REALLY want to contribute still.... read this first
+
+### Install `vp`
+
+T3 Code uses Vite+ so you'll need to install the global `vp` command-line tool.
+
+#### macOS / Linux
+
+```bash
+curl -fsSL https://vite.plus | bash
+```
+
+#### Windows
+
+```bash
+irm https://vite.plus/ps1 | iex
+```
+
+Checkout their getting started guide for more information: https://viteplus.dev/guide/
+
+### Install dependencies
+
+```bash
+vp i
+```
+
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
+
+Have a feature request? Start an [Ideas discussion](https://github.com/pingdotgg/t3code/discussions/categories/ideas).
+
+Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).

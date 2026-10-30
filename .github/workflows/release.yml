@@ -1,649 +1,1467 @@
-name: Heiwa Release
+name: Release
 
 on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "!v*-nightly.*"
+      - "!v*-preview.*"
+  schedule:
+    # Avoid minute zero, when GitHub scheduled jobs are busiest.
+    - cron: "8,38 * * * *"
   workflow_dispatch:
     inputs:
-      tag:
-        description: Existing git tag to release (for example v0.1.0)
-        required: true
-        type: string
-      macos_signing:
-        description: >-
-          macOS signing. developer-id signs and notarizes the app and DMG.
-          ad-hoc ships the app only through the installer (curl downloads are
-          not quarantined), with no DMG and no notarization.
-        required: true
-        default: developer-id
+      channel:
+        description: "Release channel"
+        required: false
+        default: preview
         type: choice
         options:
-          - developer-id
-          - ad-hoc
+          - preview
+          - stable
+          - nightly
+      version:
+        description: "Stable version override (for example 1.2.3). Defaults to the version the latest nightly previewed."
+        required: false
+        type: string
+
+# Serialize nightlies (scheduled and manual) so overlapping runs cannot build
+# the same commit twice or publish out of order. Stable tag releases get their
+# own group so a nightly never blocks them. Running publishers are never
+# canceled, and queue: max keeps every pending run instead of the default
+# newest-wins single slot, so a queued stable tag can never be silently
+# dropped. Automatic nightlies recheck the release gap after leaving the queue.
+concurrency:
+  group: release-${{ (github.event_name == 'schedule' || inputs.channel == 'nightly' || inputs.channel == 'preview') && 'nightly' || 'stable' }}
+  cancel-in-progress: false
+  queue: max
 
 permissions:
+  # The Windows desktop jobs read this run's artifact list to wait for the
+  # Linux CLI archive they embed (see release-desktop.yml).
   actions: read
   contents: read
-
-concurrency:
-  group: heiwa-release-${{ inputs.tag }}
-  cancel-in-progress: false
+  id-token: none
 
 jobs:
-  metadata:
-    name: Resolve Release Metadata
-    runs-on: ubuntu-latest
-    timeout-minutes: 16
+  # Picks the commit every later job builds. Nightlies and tag pushes build the
+  # triggering commit. Manual stable releases build the commit of the latest
+  # published nightly, so stable only ever ships a build that nightly users
+  # have already run. Scheduled runs also decide here whether a nightly is due.
+  resolve_commit:
+    name: Resolve release commit
+    if: github.repository == 'pingdotgg/t3code'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 5
     outputs:
-      tag: ${{ steps.meta.outputs.tag }}
-      version: ${{ steps.meta.outputs.version }}
-      commit: ${{ steps.meta.outputs.commit }}
+      ref: ${{ steps.resolve.outputs.ref }}
+      nightly_version: ${{ steps.resolve.outputs.nightly_version }}
+      has_changes: ${{ steps.resolve.outputs.has_changes }}
     steps:
-      # Releases are dispatched from main so optimized Rust caches live on the
-      # default branch and remain reusable by later release tags.
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
-          persist-credentials: false
-          ref: main
+          sparse-checkout: .github/scripts
+
+      - id: resolve
+        name: Resolve release commit
+        uses: actions/github-script@v8
+        env:
+          DISPATCH_CHANNEL: ${{ inputs.channel }}
+        with:
+          script: |
+            const {
+              assertCommitOnDefaultBranch,
+              assertReleaseSource,
+              shouldReleaseNightly,
+              resolveLatestNightlyCommit,
+            } = require('./.github/scripts/check-nightly-release.cjs');
+
+            const dispatchChannel = process.env.DISPATCH_CHANNEL || 'preview';
+            const releaseChannel = context.eventName === 'schedule'
+              ? 'nightly'
+              : context.eventName === 'workflow_dispatch'
+                ? dispatchChannel
+                : 'stable';
+
+            await assertReleaseSource({ github, context, releaseChannel });
+
+            if (context.eventName === 'schedule') {
+              core.setOutput('has_changes', await shouldReleaseNightly({ github, context, core }));
+              core.setOutput('ref', context.sha);
+            } else if (context.eventName === 'workflow_dispatch' && dispatchChannel === 'stable') {
+              const { tag, sha, version } = await resolveLatestNightlyCommit({ github, context, core });
+              await assertCommitOnDefaultBranch({ github, context, sha });
+              core.notice(`Stable release builds ${sha}, the commit shipped by ${tag}.`);
+              core.setOutput('ref', sha);
+              core.setOutput('nightly_version', version);
+            } else {
+              core.setOutput('ref', context.sha);
+            }
+
+  preflight:
+    name: Preflight
+    needs: [resolve_commit]
+    if: |
+      needs.resolve_commit.result == 'success' &&
+      (github.event_name != 'schedule' || needs.resolve_commit.outputs.has_changes == 'true')
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
+    outputs:
+      release_channel: ${{ steps.release_meta.outputs.release_channel }}
+      version: ${{ steps.release_meta.outputs.version }}
+      tag: ${{ steps.release_meta.outputs.tag }}
+      release_name: ${{ steps.release_meta.outputs.name }}
+      short_sha: ${{ steps.release_meta.outputs.short_sha }}
+      previous_tag: ${{ steps.previous_tag.outputs.previous_tag }}
+      cli_dist_tag: ${{ steps.release_meta.outputs.cli_dist_tag }}
+      is_prerelease: ${{ steps.release_meta.outputs.is_prerelease }}
+      make_latest: ${{ steps.release_meta.outputs.make_latest }}
+      ref: ${{ needs.resolve_commit.outputs.ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve_commit.outputs.ref }}
           fetch-depth: 0
-          fetch-tags: true
-      - id: meta
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
+        env:
+          pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
+
+      - id: release_meta
+        name: Resolve release version
         shell: bash
         env:
-          DISPATCH_TAG: ${{ inputs.tag }}
+          DISPATCH_CHANNEL: ${{ github.event.inputs.channel }}
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          NIGHTLY_VERSION: ${{ needs.resolve_commit.outputs.nightly_version }}
+          NIGHTLY_DATE: ${{ github.run_started_at }}
+          NIGHTLY_SHA: ${{ needs.resolve_commit.outputs.ref }}
+          NIGHTLY_RUN_NUMBER: ${{ github.run_number }}
         run: |
-          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_CHANNEL:-preview}" == "nightly" ) ]]; then
+            nightly_date="$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)"
 
-          tag="${DISPATCH_TAG}"
+            node scripts/resolve-nightly-release.ts \
+              --date "$nightly_date" \
+              --run-number "$NIGHTLY_RUN_NUMBER" \
+              --sha "$NIGHTLY_SHA" \
+              --github-output
 
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tags must look like v0.1.0" >&2
-            exit 1
-          fi
+            echo "release_channel=nightly" >> "$GITHUB_OUTPUT"
+            echo "cli_dist_tag=nightly" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_CHANNEL:-preview}" == "preview" ]]; then
+            # Manual-only test train: exercises the whole release flow for a
+            # commit end users must never receive. Never scheduled.
+            # Same versioning as nightly under its own prerelease identifier.
+            # A preview release is reachable only by asking for it: npm gets it
+            # under the `preview` dist-tag, which nothing resolves by default,
+            # its desktop builds carry no update feed, and no updater manifest
+            # is attached to the release, so neither stable nor nightly
+            # installs can ever be offered one.
+            nightly_date="$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)"
 
-          if [[ "$(git cat-file -t "$tag" 2>/dev/null || true)" != "tag" ]]; then
-            echo "Release tag must exist and be annotated: $tag" >&2
-            exit 1
-          fi
+            node scripts/resolve-nightly-release.ts \
+              --channel preview \
+              --date "$nightly_date" \
+              --run-number "$NIGHTLY_RUN_NUMBER" \
+              --sha "$NIGHTLY_SHA" \
+              --github-output
 
-          commit="$(git rev-parse "${tag}^{}")"
-          if ! git merge-base --is-ancestor "$commit" HEAD; then
-            echo "Release tag $tag does not resolve to a commit on main" >&2
-            exit 1
-          fi
-
-          {
-            echo "tag=$tag"
-            echo "version=${tag#v}"
-            echo "commit=$commit"
-          } >> "$GITHUB_OUTPUT"
-
-      # Validate the resolved tag's data with trusted validators from main.
-      # Checking main's current declarations can approve an old mismatched
-      # tag, or reject a valid ancestor once main advances to the next version.
-      # Restore only data files; never execute validation scripts from the tag.
-      - name: Stage release version and installer declarations
-        id: release-source
-        shell: bash
-        env:
-          RELEASE_COMMIT: ${{ steps.meta.outputs.commit }}
-        run: |
-          set -euo pipefail
-          git restore --source="$RELEASE_COMMIT" --worktree -- \
-            apps/heiwa_shell/Cargo.toml \
-            apps/heiwa_core/Cargo.toml \
-            apps/heiwa_app/desktop/src-tauri/Cargo.toml \
-            apps/heiwa_app/desktop/src-tauri/tauri.conf.json \
-            apps/heiwa_app/desktop/package.json \
-            apps/heiwa_app/clients/web/install \
-            apps/heiwa_app/clients/web/install.sh
-
-      # Every other gate compares the tag against the installer pin. None
-      # compared it against the code, which is how v0.2.0 shipped a binary
-      # reporting `heiwa 0.1.0`.
-      - name: Require the code to declare the version being released
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
-        run: bash scripts/check_release_version_sync.sh "$RELEASE_VERSION"
-
-      - name: Require a fresh public installer pin
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
-        run: bash scripts/check_installer_version_pin.sh "$RELEASE_VERSION"
-
-      # The checkout pin and the bytes served at heiwa.ltd/install are different
-      # truths: the installer reaches users through the dispatch-only Cloudflare
-      # deploy, which this workflow does not trigger. Without this check a
-      # release can go out while the edge still serves the previous fallback,
-      # and any new install whose latest-release lookup fails lands on the old
-      # version. Deploy the installer first, then release.
-      - name: Require the served public installer to match
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
-        run: bash scripts/check_installer_version_pin.sh --served "$RELEASE_VERSION"
-
-      - name: Require Apple distribution credentials
-        if: inputs.macos_signing == 'developer-id'
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-        run: |
-          set -euo pipefail
-          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD; do
-            test -n "${!name}" || { echo "Missing required release credential: $name" >&2; exit 1; }
-          done
-          [[ "$APPLE_SIGNING_IDENTITY" == 'Developer ID Application:'* ]] || { echo 'A Developer ID Application identity is required.' >&2; exit 1; }
-
-      - name: Require successful full main certification
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_COMMIT: ${{ steps.meta.outputs.commit }}
-        run: |
-          set -euo pipefail
-
-          deadline=$((SECONDS + 900))
-          required_workflows=(ci.yml certification.yml)
-          while (( SECONDS < deadline )); do
-            all_passed=true
-            for workflow_file in "${required_workflows[@]}"; do
-              result="$({
-                gh api \
-                  "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?event=push&branch=main&head_sha=${RELEASE_COMMIT}&per_page=20" \
-                  --jq '.workflow_runs | sort_by(.run_number) | last | [.status, (.conclusion // "")] | @tsv'
-              } 2>/dev/null || true)"
-
-              if [[ -z "$result" ]]; then
-                echo "Waiting for ${workflow_file} to start at ${RELEASE_COMMIT}."
-                all_passed=false
-                continue
-              fi
-
-              IFS=$'\t' read -r status conclusion <<<"$result"
-              if [[ "$status" != "completed" ]]; then
-                echo "Waiting for ${workflow_file} at ${RELEASE_COMMIT}: ${status}."
-                all_passed=false
-                continue
-              fi
-
-              if [[ "$conclusion" != "success" ]]; then
-                echo "${workflow_file} failed at ${RELEASE_COMMIT}: ${conclusion}." >&2
+            echo "release_channel=preview" >> "$GITHUB_OUTPUT"
+            echo "cli_dist_tag=preview" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+          else
+            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+              raw="${DISPATCH_VERSION:-$NIGHTLY_VERSION}"
+              if [[ -z "$raw" ]]; then
+                echo "workflow_dispatch stable releases need a version input or a published nightly." >&2
                 exit 1
               fi
-            done
-
-            if [[ "$all_passed" == "true" ]]; then
-              echo "Fast CI and full certification passed at ${RELEASE_COMMIT}."
-              exit 0
+            else
+              raw="${GITHUB_REF_NAME}"
             fi
-            sleep 10
-          done
 
-          echo "Timed out waiting for main certification at ${RELEASE_COMMIT}." >&2
-          exit 1
-
-  cockpit:
-    name: Build Cockpit Assets
-    needs: metadata
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-          ref: ${{ needs.metadata.outputs.commit }}
-      - name: Set up Node
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - name: Build cockpit
-        run: |
-          npm ci --ignore-scripts
-          npm --prefix apps/heiwa_app/clients/cockpit run build
-          test -f apps/heiwa_app/clients/cockpit/dist/index.html
-          test -n "$(find apps/heiwa_app/clients/cockpit/dist/assets -type f -print -quit)"
-      - name: Upload cockpit assets
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: cockpit
-          path: apps/heiwa_app/clients/cockpit/dist/
-          if-no-files-found: error
-
-  # macOS only, deliberately. latest.json describes darwin-aarch64 and nothing
-  # else, and the public installer places the app on macOS alone -- a Windows
-  # or Linux bundle here would be an artifact no install path consumes and no
-  # updater manifest covers. They return when those two things exist for them.
-  # The CLI tarball in `build` below still ships for all three platforms.
-  desktop-bundle:
-    name: Build Desktop Bundle (${{ matrix.name }})
-    needs: [metadata, build]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macos-aarch64
-            runner: macos-26
-            # developer-id: both download paths carry the same notarized app.
-            # ad-hoc builds only the app; the DMG glob then matches nothing.
-            bundles: app,dmg
-            artifact_glob: |
-              dist/desktop/*-app.tar.gz
-              dist/desktop/*-app.tar.gz.sig
-              dist/desktop/latest.json
-              dist/desktop/*.dmg
-
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-          ref: ${{ needs.metadata.outputs.commit }}
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
-        with:
-          toolchain: 1.95.0
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
-
-      - name: Set up Node
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version-file: .nvmrc
-
-      - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
-            patchelf libdbus-1-dev pkg-config
-
-      - name: Install frontend dependencies
-        run: npm ci --ignore-scripts --prefix apps/heiwa_app/desktop
-
-      - name: Download the exact published CLI candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: macos-aarch64
-          path: runtime-asset
-
-      - name: Stage the signed runtime as a bundled resource
-        shell: bash
-        env:
-          VERSION: ${{ needs.metadata.outputs.version }}
-        run: |
-          set -euo pipefail
-          mkdir -p runtime-unpacked apps/heiwa_app/desktop/src-tauri/resources
-          tar -xzf "runtime-asset/heiwa-${VERSION}-macos-aarch64.tar.gz" -C runtime-unpacked
-          cp "runtime-unpacked/heiwa-${VERSION}-macos-aarch64/heiwa" apps/heiwa_app/desktop/src-tauri/resources/heiwa
-          codesign --verify --strict apps/heiwa_app/desktop/src-tauri/resources/heiwa
-
-      - name: Prepare Developer ID signing
-        if: inputs.macos_signing == 'developer-id'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: bash scripts/macos_signing_keychain.sh
-
-      - name: Build desktop bundle
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          MACOS_SIGNING: ${{ inputs.macos_signing }}
-        run: |
-          set -euo pipefail
-          if [[ "$MACOS_SIGNING" == "ad-hoc" ]]; then
-            # No Apple account: build with the checked-in ad-hoc signing
-            # config (the one local device proofs use) and never let Tauri
-            # attempt notarization. A DMG would be quarantined by the browser
-            # and blocked by Gatekeeper, so the installer is the only path.
-            unset APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD APPLE_SIGNING_IDENTITY
-            npm --prefix apps/heiwa_app/desktop run tauri:build -- --bundles app
-            exit 0
-          fi
-          python3 - <<'PYCONFIG'
-          import json, os
-          with open(os.path.join(os.environ['RUNNER_TEMP'], 'heiwa-signing.json'), 'w') as handle:
-              json.dump({'bundle': {'macOS': {'signingIdentity': os.environ['APPLE_SIGNING_IDENTITY'], 'hardenedRuntime': True}}}, handle)
-          PYCONFIG
-          npm --prefix apps/heiwa_app/desktop run tauri:build -- --bundles ${{ matrix.bundles }} --config "$RUNNER_TEMP/heiwa-signing.json"
-
-      - name: Verify signed app and coherent runtime
-        shell: bash
-        env:
-          VERSION: ${{ needs.metadata.outputs.version }}
-          MACOS_SIGNING: ${{ inputs.macos_signing }}
-        run: |
-          set -euo pipefail
-          app="target/release/bundle/macos/Heiwa.app"
-          codesign --verify --deep --strict "$app"
-          if [[ "$MACOS_SIGNING" == "ad-hoc" ]]; then
-            codesign -dv "$app" 2>&1 | grep -q '^Signature=adhoc$'
-          else
-            xcrun stapler validate "$app"
-            spctl --assess --type execute --verbose=2 "$app"
-          fi
-          cmp "runtime-unpacked/heiwa-${VERSION}-macos-aarch64/heiwa" "$app/Contents/Resources/resources/heiwa"
-          codesign --verify --strict "$app/Contents/Resources/resources/heiwa-apple-resources"
-
-      - name: Collect the signed macOS app and write the update manifest
-        if: matrix.name == 'macos-aarch64'
-        shell: bash
-        env:
-          VERSION: ${{ needs.metadata.outputs.version }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          MACOS_SIGNING: ${{ inputs.macos_signing }}
-        run: |
-          set -euo pipefail
-          bundle_dir="target/release/bundle/macos"
-          archive="${bundle_dir}/Heiwa.app.tar.gz"
-          signature="${archive}.sig"
-
-          for required in "$archive" "$signature"; do
-            test -f "$required" || {
-              echo "missing $required -- createUpdaterArtifacts did not run," \
-                "or TAURI_SIGNING_PRIVATE_KEY was not set" >&2
+            version="${raw#v}"
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid release version: $raw" >&2
               exit 1
-            }
-          done
+            fi
 
-          mkdir -p dist/desktop
-          asset="heiwa-${VERSION}-macos-aarch64-app.tar.gz"
-          cp "$archive" "dist/desktop/${asset}"
-          cp "$signature" "dist/desktop/${asset}.sig"
-          if [[ "$MACOS_SIGNING" == "developer-id" ]]; then
-            dmg=(target/release/bundle/dmg/*.dmg)
-            test "${#dmg[@]}" -eq 1 && test -f "${dmg[0]}"
-            xcrun notarytool submit "${dmg[0]}" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_PASSWORD" --wait --output-format json > "$RUNNER_TEMP/heiwa-dmg-notarization.json"
-            python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "Accepted", "DMG notarization was not accepted"' "$RUNNER_TEMP/heiwa-dmg-notarization.json"
-            xcrun stapler staple "${dmg[0]}"
-            xcrun stapler validate "${dmg[0]}"
-            cp "${dmg[0]}" "dist/desktop/heiwa-${VERSION}-macos-aarch64.dmg"
+            echo "release_channel=stable" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
+            echo "name=T3 Code v$version" >> "$GITHUB_OUTPUT"
+            echo "cli_dist_tag=latest" >> "$GITHUB_OUTPUT"
+            if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+              echo "make_latest=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+              echo "make_latest=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
-          # The manifest points at the renamed asset, so the URL has to be
-          # built from the release tag rather than copied from the bundler.
-          base="https://github.com/Heiwa-Limited/heiwa-universe/releases/download/v${VERSION}"
-          python3 -c '
-          import json, sys
-          version, url, sig_path = sys.argv[1], sys.argv[2], sys.argv[3]
-          with open(sig_path) as handle:
-              signature = handle.read().strip()
-          print(json.dumps({
-              "version": version,
-              "notes": "Heiwa " + version,
-              "platforms": {"darwin-aarch64": {"signature": signature, "url": url}},
-          }, indent=2))
-          ' "$VERSION" "$base/${asset}" "dist/desktop/${asset}.sig" \
-            > dist/desktop/latest.json
-
-          python3 -c "import json,sys; d=json.load(open('dist/desktop/latest.json')); assert d['platforms']['darwin-aarch64']['signature'], 'empty signature'; print('manifest ok:', d['version'])"
-
-      - name: Upload desktop bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: desktop-${{ matrix.name }}
-          path: ${{ matrix.artifact_glob }}
-          if-no-files-found: error
-
-      - name: Remove temporary signing keychain
-        if: always() && runner.os == 'macOS'
+      - id: previous_tag
+        name: Resolve previous release tag
         run: |
-          if [ -f "$RUNNER_TEMP/heiwa-signing.keychain-db" ]; then
-            security delete-keychain "$RUNNER_TEMP/heiwa-signing.keychain-db"
+          node scripts/resolve-previous-release-tag.ts \
+            --channel "${{ steps.release_meta.outputs.release_channel }}" \
+            --current-tag "${{ steps.release_meta.outputs.tag }}" \
+            --github-output
+
+      # Share only the verification results, not the large registry metadata cache.
+      - name: Upload dependency verification
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-dependency-verification
+          path: ${{ runner.temp }}/pnpm-metadata/lockfile-verified.jsonl
+
+  quality:
+    name: Release quality checks
+    needs: [preflight]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Check
+        run: vp check
+
+      - name: Typecheck
+        run: vp run typecheck
+
+  # Keep tests on their own runners, using the same package split and server
+  # shards as CI (test, test_web, test_server in ci.yml). Keep the two in sync.
+  test:
+    name: Release tests
+    needs: [preflight]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - uses: ./.github/actions/setup-apt-mirrors
+
+      - name: Install browser secret helper build libraries
+        run: |
+          sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config build-essential
+
+      - name: Test
+        run: vp run --parallel --concurrency-limit 4 --filter '!t3' --filter '!@t3tools/monorepo' --filter '!@t3tools/web' test
+
+  # Web browser tests time out when they share a runner with the other package
+  # suites: Chromium gets too little CPU and diff workers miss their 10s start budget.
+  test_web:
+    name: Release web tests
+    needs: [preflight]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
+
+      - name: Resolve Playwright version
+        id: playwright_version
+        run: echo "version=$(node -p "require('./apps/web/node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Chromium
+        id: chromium_cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-shell-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright_version.outputs.version }}
+
+      - name: Install Chromium for web browser tests
+        if: steps.chromium_cache.outputs.cache-hit != 'true'
+        run: node apps/web/node_modules/playwright/cli.js install --only-shell chromium
+
+      - name: Install missing Chromium system dependencies
+        run: |
+          browser=$(find "$HOME/.cache/ms-playwright" -name chrome-headless-shell -type f -print -quit)
+          test -n "$browser"
+          if ldd "$browser" | grep '=> not found'; then
+            node apps/web/node_modules/playwright/cli.js install-deps chromium
           fi
 
-  build:
-    name: Build Release Asset (${{ matrix.name }})
-    needs: [metadata, cockpit]
-    runs-on: ${{ matrix.runner }}
+      - name: Test
+        run: vp run --filter @t3tools/web test
+
+      # Browser tests run source modules; this boots the production chunk graph.
+      - name: Boot the built web client
+        run: |
+          vp run --filter @t3tools/web build
+          node apps/web/scripts/verify-built-boot.ts
+
+  # Server test files run one at a time, so more small runners beat fewer big ones.
+  test_server:
+    name: Release server tests ${{ matrix.shard }}
+    needs: [preflight]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: linux-x86_64
-            runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            archive_ext: tar.gz
-            binary_name: heiwa
-          - name: macos-aarch64
-            # The app targets macOS 27; build hosts and deployment floors differ.
-            runner: macos-26
-            target: aarch64-apple-darwin
-            archive_ext: tar.gz
-            binary_name: heiwa
-          - name: windows-x86_64
-            runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            archive_ext: zip
-            binary_name: heiwa.exe
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
-          persist-credentials: false
-          ref: ${{ needs.metadata.outputs.commit }}
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
         with:
-          toolchain: 1.95.0
-          target: ${{ matrix.target }}
+          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
 
-      - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: |
-            .
-          prefix-key: v3-release
-          shared-key: ${{ matrix.target }}
-          cache-on-failure: true
-          cache-workspace-crates: true
-          cache-bin: false
+      # No Electron setup here: `t3` (apps/server) has no Electron dependency
+      # and none of its tests touch the runtime. Only the non-server `test`
+      # job, which covers @t3tools/desktop, needs the download.
+      - name: Install Chromium for server browser integration tests
+        run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
 
-      # Release binaries explicitly include Lance; its lance-encoding
-      # dependency shells out to `protoc` at build time.
-      - name: Install protoc
-        uses: taiki-e/install-action@f6886ea0c81d86f9719fdab9de74e4d72e8486fb # protoc
+      - name: Test
+        run: vp run --filter t3 test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
-      - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
-
-      - name: Build release binary
-        env:
-          # Compiled in, so an installed runtime reports the channel and commit it came from.
-          HEIWA_BUILD_CHANNEL: main
-          HEIWA_BUILD_COMMIT: ${{ needs.metadata.outputs.commit }}
-        run: >
-          cargo build --locked --release -p heiwa-shell --bin heiwa
-          --features heiwa-shell/lance --target ${{ matrix.target }}
-
-      - name: Prepare macOS CLI signing
-        if: runner.os == 'macOS' && inputs.macos_signing == 'developer-id'
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: bash scripts/macos_signing_keychain.sh
-
-      - name: Sign the macOS CLI candidate
-        if: runner.os == 'macOS'
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          MACOS_SIGNING: ${{ inputs.macos_signing }}
-        run: |
-          set -euo pipefail
-          binary=target/aarch64-apple-darwin/release/heiwa
-          if [[ "$MACOS_SIGNING" == "ad-hoc" ]]; then
-            codesign --force --sign - "$binary"
-            codesign -dv "$binary" 2>&1 | grep -q '^Signature=adhoc$'
-          else
-            codesign --force --options runtime --timestamp --entitlements apps/heiwa_app/desktop/src-tauri/Heiwa.entitlements --sign "$APPLE_SIGNING_IDENTITY" "$binary"
-          fi
-          codesign --verify --strict "$binary"
-
-      - name: Download cockpit assets
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: cockpit
-          path: cockpit-dist
-
-      - name: Package archive
-        shell: bash
-        env:
-          VERSION: ${{ needs.metadata.outputs.version }}
-          ASSET_NAME: ${{ matrix.name }}
-          TARGET: ${{ matrix.target }}
-          ARCHIVE_EXT: ${{ matrix.archive_ext }}
-          BINARY_NAME: ${{ matrix.binary_name }}
-        run: |
-          set -euo pipefail
-
-          release_root="dist/heiwa-${VERSION}-${ASSET_NAME}"
-          archive_path="${release_root}.${ARCHIVE_EXT}"
-          binary_path="target/${TARGET}/release/${BINARY_NAME}"
-
-          mkdir -p "${release_root}/cockpit"
-          cp "${binary_path}" "${release_root}/"
-          cp README.md CONTRIBUTING.md CODE_OF_CONDUCT.md LICENSE "${release_root}/"
-          cp -R cockpit-dist/. "${release_root}/cockpit/"
-          test -f "${release_root}/cockpit/index.html"
-          test -n "$(find "${release_root}/cockpit/assets" -type f -print -quit)"
-
-          if [[ "${ARCHIVE_EXT}" == "zip" ]]; then
-            # Run 7z from dist so the archive starts at the declared release
-            # root instead of accidentally embedding an extra dist/ parent.
-            (
-              cd dist
-              7z a "$(basename "${archive_path}")" "$(basename "${release_root}")" >/dev/null
-            )
-          else
-            tar -C dist -czf "${archive_path}" "heiwa-${VERSION}-${ASSET_NAME}"
-          fi
-
-      - name: Upload packaged asset
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ matrix.name }}
-          path: dist/heiwa-${{ needs.metadata.outputs.version }}-${{ matrix.name }}.${{ matrix.archive_ext }}
-          if-no-files-found: error
-
-      - name: Remove temporary signing keychain
-        if: always() && runner.os == 'macOS'
-        run: |
-          if [ -f "$RUNNER_TEMP/heiwa-signing.keychain-db" ]; then
-            security delete-keychain "$RUNNER_TEMP/heiwa-signing.keychain-db"
-          fi
-
-  checksums:
-    name: Generate Checksums
-    needs: [metadata, build, desktop-bundle]
-    runs-on: ubuntu-latest
+  relay_public_config:
+    name: Resolve T3 Connect public config
+    # Consumes only the release commit, not preflight's resolved version, so it
+    # runs alongside preflight instead of after it. The condition mirrors preflight's.
+    needs: [resolve_commit]
+    if: |
+      needs.resolve_commit.result == 'success' &&
+      (github.event_name != 'schedule' || needs.resolve_commit.outputs.has_changes == 'true')
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 5
+    environment:
+      name: production
+    outputs:
+      clerk_publishable_key: ${{ steps.public_config.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ steps.public_config.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ steps.public_config.outputs.clerk_cli_oauth_client_id }}
+      relay_url: ${{ steps.public_config.outputs.relay_url }}
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      RELAY_DOMAIN: ${{ vars.RELAY_DOMAIN }}
+      RELAY_API_ZONE_NAME: ${{ vars.RELAY_API_ZONE_NAME }}
+      CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+      CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+      CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
     steps:
-      - name: Download packaged assets
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
-          pattern: "*-*"
-          path: dist
-          merge-multiple: true
+          ref: ${{ needs.resolve_commit.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
 
-      - name: Write checksum manifest
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=t3code-relay...
+
+      # The deployed stack's outputs, read from Alchemy's state store without
+      # planning or applying. Select the backend explicitly to avoid loading
+      # the stack's unrelated provider credentials; suppress informational logs
+      # and strip the credential-refresh progress prefix before parsing JSON.
+      # Redacted values are persisted as
+      # {"__redacted__": "<value>"}; the token is masked before it is written.
+      - name: Read production relay tracing config
         shell: bash
+        working-directory: infra/relay
         run: |
           set -euo pipefail
-          cd dist
-          sha256sum heiwa-* > "heiwa-${{ needs.metadata.outputs.version }}-checksums.txt"
-          # A silently-absent app archive would ship a release whose installer
-          # has nothing to place in /Applications.
-          grep -q -- '-macos-aarch64-app\.tar\.gz$' \
-            "heiwa-${{ needs.metadata.outputs.version }}-checksums.txt" || {
-            echo "checksum manifest is missing the macOS app archive" >&2
-            exit 1
+          output="$(npx alchemy state read T3CodeRelay/prod/output --backend cloudflare --log-level error --no-input | sed -n '/^{/,$p')"
+          field() {
+            jq -er --arg key "$1" '.[$key] | if type == "object" then .__redacted__ else . end | select(. != null and . != "")' <<<"$output" \
+              || { echo "Relay stack output is missing $1" >&2; exit 1; }
           }
+          url="$(field clientTracingUrl)"
+          dataset="$(field clientTracingDataset)"
+          token="$(field clientTracingToken)"
+          echo "::add-mask::$token"
+          {
+            echo "T3CODE_RELAY_CLIENT_OTLP_TRACES_URL=$url"
+            echo "T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET=$dataset"
+            echo "T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=$token"
+          } > "$RUNNER_TEMP/relay-client-tracing.env"
 
-      - name: Upload checksum artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload relay client tracing config
+        uses: actions/upload-artifact@v7
         with:
-          name: checksums
-          path: dist/heiwa-${{ needs.metadata.outputs.version }}-checksums.txt
+          name: relay-client-tracing-config
+          path: ${{ runner.temp }}/relay-client-tracing.env
           if-no-files-found: error
+          retention-days: 1
 
-  publish:
-    name: Publish GitHub Release
-    needs: [metadata, build, checksums, desktop-bundle]
-    runs-on: ubuntu-latest
-    permissions:
-      attestations: write
-      contents: write
-      id-token: write
+      - id: public_config
+        name: Resolve production relay public config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          relay_domain="${RELAY_DOMAIN:-}"
+          if [[ -z "$relay_domain" && -n "${RELAY_API_ZONE_NAME:-}" ]]; then
+            relay_domain="relay.$RELAY_API_ZONE_NAME"
+          fi
+          required=(
+            relay_domain
+            CLERK_PUBLISHABLE_KEY
+            CLERK_JWT_TEMPLATE
+            CLERK_CLI_OAUTH_CLIENT_ID
+          )
+          missing=()
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required relay deployment configuration: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+          echo "clerk_publishable_key=$CLERK_PUBLISHABLE_KEY" >> "$GITHUB_OUTPUT"
+          echo "clerk_jwt_template=$CLERK_JWT_TEMPLATE" >> "$GITHUB_OUTPUT"
+          echo "clerk_cli_oauth_client_id=$CLERK_CLI_OAUTH_CLIENT_ID" >> "$GITHUB_OUTPUT"
+          echo "relay_url=https://$relay_domain" >> "$GITHUB_OUTPUT"
+
+  # The platform-independent JS (server bundle, web client, Electron main) is
+  # built exactly once here and handed to every platform job as `js-bundle`.
+  # The relay/Clerk values are baked into the bundle, so they belong to this
+  # job rather than to the packaging jobs.
+  build_bundle:
+    name: Build JS bundle
+    # Same gating as relay_public_config: only the release commit is needed, so
+    # this runs alongside preflight. See the condition comment there.
+    needs: [preflight, relay_public_config]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' }}
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    timeout-minutes: 30
+    env:
+      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
+      T3CODE_CLERK_JWT_TEMPLATE: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
+      T3CODE_RELAY_URL: ${{ needs.relay_public_config.outputs.relay_url }}
     steps:
-      - name: Download release artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Checkout
+        uses: actions/checkout@v6
         with:
-          pattern: "*-*"
-          path: release-artifacts
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      # pnpm checks the lockfile and policy before reusing this result. A missing
+      # artifact leaves the cache empty, so installation runs the checks again.
+      - name: Download dependency verification
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: release-dependency-verification
+          path: ${{ runner.temp }}/pnpm-metadata
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=t3... --filter=@t3tools/web... --filter=@t3tools/desktop... --filter=@t3tools/scripts...
+        env:
+          pnpm_config_cache_dir: ${{ runner.temp }}/pnpm-metadata
+
+      - name: Download relay client tracing config
+        uses: actions/download-artifact@v8
+        with:
+          name: relay-client-tracing-config
+          path: ${{ runner.temp }}/relay-client-tracing
+
+      - name: Load relay client tracing config
+        shell: bash
+        run: |
+          config_path="$RUNNER_TEMP/relay-client-tracing/relay-client-tracing.env"
+          tracing_token="$(sed -n 's/^T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=//p' "$config_path")"
+          echo "::add-mask::$tracing_token"
+          cat "$config_path" >> "$GITHUB_ENV"
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
+
+      - uses: ./.github/actions/setup-apt-mirrors
+
+      # @t3tools/desktop#build compiles the Linux browser secret helper on a
+      # Linux host before packing, and that needs libsecret headers.
+      - name: Install browser secret helper build libraries
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+
+      # Runs t3#build (which depends on @t3tools/web#build) and
+      # @t3tools/desktop#build, so apps/server/dist holds the server bundle
+      # plus the web client and apps/desktop/dist-electron the Electron main.
+      # The release channel is already stable, nightly, or preview. Builds in
+      # other repositories report "dev" telemetry.
+      - name: Build JS bundle
+        env:
+          T3CODE_TELEMETRY_CHANNEL: ${{ github.repository == 'pingdotgg/t3code' && needs.preflight.outputs.release_channel || 'dev' }}
+        run: vp run build:desktop
+
+      # Two paths under apps/ so the artifact root is apps/; consumers download
+      # into `apps` to restore both at their original locations.
+      - name: Upload JS bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: js-bundle
+          path: |
+            apps/server/dist
+            apps/desktop/dist-electron
+          if-no-files-found: error
+          retention-days: 1
+
+  # One job per platform and architecture (see release-desktop.yml), each
+  # gated only on the JS bundle. Windows targets build on Linux and run their
+  # native checks on a Windows runner of their own architecture.
+  # The Windows jobs also embed the same-arch Linux CLI archive as the WSL
+  # runtime; they wait for that artifact partway through instead of for the
+  # whole Linux job. Every job builds the desktop app; all but macOS x64 also
+  # build the CLI archive for their platform, so a target either ships fully or
+  # not at all.
+  desktop_mac_arm64:
+    name: Desktop macOS arm64
+    needs: [preflight, relay_public_config, build_bundle]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build_bundle.result == 'success' }}
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      clerk_publishable_key: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
+      relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
+      label: macOS arm64
+      runner: blacksmith-12vcpu-macos-26
+      platform: mac
+      target: dmg
+      arch: arm64
+      rust_target: aarch64-apple-darwin
+      resource_key: darwin-arm64
+      cli_archive: true
+      launch_check: true
+
+  desktop_mac_x64:
+    name: Desktop macOS x64
+    needs: [preflight, relay_public_config, build_bundle]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build_bundle.result == 'success' }}
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      clerk_publishable_key: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
+      relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
+      label: macOS x64
+      runner: blacksmith-12vcpu-macos-26
+      platform: mac
+      target: dmg
+      arch: x64
+      rust_target: x86_64-apple-darwin
+      resource_key: darwin-x64
+      # No CLI archive: Node single-executables are unsupported on x64 macOS
+      # (the SEA docs list macOS as arm64 only) and the built binary segfaults
+      # on start. The x64 desktop app is Electron and unaffected.
+      cli_archive: false
+
+  desktop_linux_x64:
+    name: Desktop Linux x64
+    needs: [preflight, relay_public_config, build_bundle]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build_bundle.result == 'success' }}
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      clerk_publishable_key: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
+      relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
+      label: Linux x64
+      runner: blacksmith-32vcpu-ubuntu-2404
+      platform: linux
+      target: AppImage
+      arch: x64
+      rust_target: x86_64-unknown-linux-gnu
+      resource_key: linux-x64
+      cli_archive: true
+      launch_check: true
+
+  # node-pty has no Linux prebuild and compiles from source, so the arm64 app
+  # and archive are built on arm64 hardware rather than cross-built.
+  desktop_linux_arm64:
+    name: Desktop Linux arm64
+    needs: [preflight, relay_public_config, build_bundle]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build_bundle.result == 'success' }}
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      clerk_publishable_key: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
+      relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
+      label: Linux arm64
+      runner: blacksmith-16vcpu-ubuntu-2404-arm
+      platform: linux
+      target: AppImage
+      arch: arm64
+      rust_target: aarch64-unknown-linux-gnu
+      resource_key: linux-arm64
+      cli_archive: true
+
+  # The Windows jobs start with the other platforms and wait for the same-arch
+  # Linux CLI archive after their other setup. Packaging is mostly CPU and
+  # small-file work, which Linux runners do faster than Windows ones, so both
+  # Windows targets build and sign on Linux and only the native checks run on
+  # Windows.
+  desktop_win_x64:
+    name: Desktop Windows x64
+    needs: [preflight, relay_public_config, build_bundle]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build_bundle.result == 'success' }}
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      clerk_publishable_key: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
+      relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
+      label: Windows x64
+      runner: blacksmith-16vcpu-ubuntu-2404
+      verify_runner: windows-2025
+      platform: win
+      target: nsis
+      arch: x64
+      rust_target: x86_64-pc-windows-msvc
+      resource_key: win32-x64
+      cli_archive: true
+
+  desktop_win_arm64:
+    name: Desktop Windows arm64
+    needs: [preflight, relay_public_config, build_bundle]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build_bundle.result == 'success' }}
+    uses: ./.github/workflows/release-desktop.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      release_channel: ${{ needs.preflight.outputs.release_channel }}
+      clerk_publishable_key: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
+      clerk_jwt_template: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
+      clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
+      relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
+      label: Windows arm64
+      runner: blacksmith-16vcpu-ubuntu-2404
+      verify_runner: windows-11-arm
+      platform: win
+      target: nsis
+      arch: arm64
+      rust_target: aarch64-pc-windows-msvc
+      resource_key: win32-arm64
+      cli_archive: true
+
+  release:
+    name: Publish GitHub Release
+    needs:
+      [
+        preflight,
+        relay_public_config,
+        quality,
+        test,
+        test_web,
+        test_server,
+        desktop_mac_arm64,
+        desktop_mac_x64,
+        desktop_linux_x64,
+        desktop_linux_arm64,
+        desktop_win_x64,
+        desktop_win_arm64,
+      ]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.quality.result == 'success' && needs.test.result == 'success' && needs.test_web.result == 'success' && needs.test_server.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_mac_x64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' && needs.desktop_win_x64.result == 'success' && needs.desktop_win_arm64.result == 'success' }}
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      # Release notes read PR bodies and authors.
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          # Release notes need history back to the previous tag, not file contents.
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/scripts...
+
+      - name: Download all desktop artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
           merge-multiple: true
+          path: release-assets
 
-      - name: Download checksum manifest
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Download all CLI archives
+        uses: actions/download-artifact@v8
         with:
-          name: checksums
-          path: release-artifacts
+          pattern: cli-*
+          merge-multiple: true
+          path: release-assets
 
-      - name: Attest release artifacts
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
-        with:
-          subject-path: release-artifacts/*
+      - name: Download internal Android APK for Nightly
+        if: needs.preflight.outputs.release_channel == 'nightly'
+        continue-on-error: true
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          PACKAGE_NAME: com.t3tools.t3code
+          APK_OUTPUT_DIR: release-assets
+        run: |
+          if [ -n "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" ]; then
+            node .github/scripts/mirror-play-apk.cjs
+          fi
+
+      # Installers verify archives against this file, so it is written from the
+      # signed bytes that get uploaded, never from an earlier stage.
+      - name: Write CLI archive checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          shopt -s nullglob
+          archives=(t3-*.tar.gz t3-*.zip)
+          if [[ ${#archives[@]} -eq 0 ]]; then
+            echo "No CLI archives were produced." >&2
+            exit 1
+          fi
+          sha256sum "${archives[@]}" > SHA256SUMS
+          cat SHA256SUMS
+
+      # The desktop build omits the publish config for preview versions, so
+      # electron-builder emits no updater manifests for them. Refuse to publish
+      # if one shows up anyway: a `latest*.yml` or `nightly*.yml` on a preview
+      # release is what would let a stable or nightly install update onto it.
+      - name: Refuse updater metadata on preview releases
+        if: needs.preflight.outputs.release_channel == 'preview'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob extglob
+          # builder-debug.yml is electron-builder's config dump, not a feed.
+          updater_files=(release-assets/!(builder-debug).yml release-assets/*.blockmap)
+          if [[ ${#updater_files[@]} -ne 0 ]]; then
+            printf 'Preview releases must not carry updater metadata, found: %s\n' "${updater_files[*]}" >&2
+            exit 1
+          fi
+
+      # electron-updater reads one manifest per platform and channel and picks
+      # the file entry whose name carries the running arch, so the per-arch
+      # manifests the build jobs wrote are merged back into that one file.
+      - name: Merge macOS updater manifests
+        if: needs.preflight.outputs.release_channel != 'preview'
+        run: |
+          shopt -s nullglob
+          for x64_manifest in release-assets/*-mac-x64.yml; do
+            arm64_manifest="${x64_manifest%-x64.yml}.yml"
+            if [[ -f "$arm64_manifest" ]]; then
+              node scripts/merge-update-manifests.ts --platform mac "$arm64_manifest" "$x64_manifest"
+              rm -f "$x64_manifest"
+            fi
+          done
+
+      - name: Merge Windows updater manifests
+        if: needs.preflight.outputs.release_channel != 'preview'
+        run: |
+          shopt -s nullglob
+          for x64_manifest in release-assets/*-win-x64.yml; do
+            arm64_manifest="${x64_manifest%-x64.yml}-arm64.yml"
+            merged_manifest="${x64_manifest%-win-x64.yml}.yml"
+            if [[ -f "$arm64_manifest" ]]; then
+              node scripts/merge-update-manifests.ts --platform win "$x64_manifest" "$arm64_manifest" "$merged_manifest"
+              rm -f "$x64_manifest" "$arm64_manifest"
+            else
+              mv "$x64_manifest" "$merged_manifest"
+            fi
+          done
+
+      # Updater manifests and blockmaps are what electron-updater consumes.
+      # They are only listed for channels an updater is meant to follow.
+      - id: release_files
+        name: Resolve release asset list
+        shell: bash
+        run: |
+          {
+            echo 'files<<EOF'
+            echo 'release-assets/*.dmg'
+            echo 'release-assets/*.zip'
+            echo 'release-assets/*.AppImage'
+            echo 'release-assets/*.deb'
+            echo 'release-assets/*.exe'
+            if [[ "${{ needs.preflight.outputs.release_channel }}" != "preview" ]]; then
+              echo 'release-assets/*.blockmap'
+              echo 'release-assets/*.yml'
+            fi
+            echo 'release-assets/*.tar.gz'
+            # Only list APKs when Play has a processed internal build available.
+            for apk in release-assets/*.apk; do
+              [[ -f "$apk" ]] && echo "$apk"
+            done
+            echo 'release-assets/SHA256SUMS'
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # A short model summary over GitHub's full list. Without a notes file, the
+      # release falls back to GitHub's generated notes.
+      - name: Write release notes
+        if: needs.preflight.outputs.release_channel != 'preview' && needs.preflight.outputs.previous_tag != ''
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          node scripts/generate-release-notes.ts \
+            --repository "${{ github.repository }}" \
+            --tag "${{ needs.preflight.outputs.tag }}" \
+            --ref "${{ needs.preflight.outputs.ref }}" \
+            --previous-tag "${{ needs.preflight.outputs.previous_tag }}" \
+            --version "${{ needs.preflight.outputs.version }}" \
+            --output release-notes.md
+          if [[ -f release-notes.md ]]; then
+            cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # A preview release gets a warning instead of generated notes. Generated
+      # notes would list every commit since the previous preview, which is
+      # unmerged branch history no one should read as a changelog, and would
+      # make the release look like any other build to someone browsing the
+      # releases page.
+      - name: Write preview release notes
+        if: needs.preflight.outputs.release_channel == 'preview'
+        shell: bash
+        run: |
+          cat > release-notes.md <<'EOF'
+          > [!WARNING]
+          > **This is a preview build. Do not install it unless you know exactly why you are here.**
+          >
+          > Preview builds are cut by maintainers from unreleased branches to exercise the release pipeline. They can be broken, receive no fixes, are never offered as updates, and are not supported. If you want T3 Code, install the [latest release](https://github.com/pingdotgg/t3code/releases/latest) or a nightly instead.
+
+          Built from `${{ needs.preflight.outputs.ref }}`.
+          EOF
 
       - name: Publish release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        if: needs.preflight.outputs.previous_tag != ''
+        uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ needs.metadata.outputs.tag }}
-          name: Heiwa ${{ needs.metadata.outputs.tag }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          files: release-artifacts/*
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.ref }}
+          name: ${{ needs.preflight.outputs.release_name }}
+          generate_release_notes: ${{ hashFiles('release-notes.md') == '' }}
+          body_path: ${{ hashFiles('release-notes.md') != '' && 'release-notes.md' || '' }}
+          previous_tag: ${{ needs.preflight.outputs.previous_tag }}
+          prerelease: ${{ needs.preflight.outputs.is_prerelease }}
+          draft: ${{ needs.preflight.outputs.is_prerelease }}
+          make_latest: ${{ needs.preflight.outputs.make_latest }}
+          files: ${{ steps.release_files.outputs.files }}
+          fail_on_unmatched_files: true
+          token: ${{ github.token }}
 
-  # A release is not done when the assets exist; it is done when a stranger can
-  # install it. v0.1.0 shipped an update path that reported `"implemented":
-  # false` and stranded every install; v0.2.0 shipped a binary that reported
-  # `heiwa 0.1.0`. The smoke workflow catches both classes, but it was
-  # dispatch-only, so it only ran when someone remembered. Run it against the
-  # version that was just published.
-  verify-install:
-    name: Verify Public Install
-    needs: [metadata, publish]
-    uses: ./.github/workflows/public-install-smoke.yml
-    with:
-      version: ${{ needs.metadata.outputs.version }}
+      - name: Publish first release
+        if: needs.preflight.outputs.previous_tag == ''
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.ref }}
+          name: ${{ needs.preflight.outputs.release_name }}
+          generate_release_notes: ${{ needs.preflight.outputs.release_channel != 'preview' }}
+          body_path: ${{ needs.preflight.outputs.release_channel == 'preview' && 'release-notes.md' || '' }}
+          prerelease: ${{ needs.preflight.outputs.is_prerelease }}
+          draft: ${{ needs.preflight.outputs.is_prerelease }}
+          make_latest: ${{ needs.preflight.outputs.make_latest }}
+          files: ${{ steps.release_files.outputs.files }}
+          fail_on_unmatched_files: true
+          token: ${{ github.token }}
 
-  # Package the exact release bytes already published and checksummed. Keep
-  # one container publication recipe for standalone and release-triggered runs.
-  container:
-    name: Build and Push Container Image
-    needs: [metadata, publish]
+      # The action keeps a stable release a draft until its assets finish uploading, but publishes a
+      # prerelease first. Desktop clients update connected servers from the CLI archives as soon as
+      # they see the release, so a prerelease also goes public only once every asset is attached.
+      - name: Publish prerelease
+        if: needs.preflight.outputs.is_prerelease == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false
+
+  # The `t3` npm package is a launcher that downloads this version's CLI
+  # archive from the GitHub Release, so it publishes only once that release
+  # exists. Preview publishes too, under the `preview` dist-tag, which
+  # nothing resolves unless asked for by name.
+  publish_cli:
+    name: Publish CLI to npm
+    needs: [preflight, release]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' }}
+    runs-on: ubuntu-24.04 # blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 15
     permissions:
       contents: read
-      packages: write
-    uses: ./.github/workflows/container.yml
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=t3... --filter=@t3tools/scripts...
+
+      - name: Build the npm launcher
+        run: node scripts/build-npm-launcher.ts --version "${{ needs.preflight.outputs.version }}" --output-dir npm-packages
+
+      - name: Publish the npm launcher
+        run: |
+          if ! node apps/server/scripts/cli.ts publish --packages-dir npm-packages --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --provenance --verbose; then
+            echo "::error::npm publish failed. Make sure package t3 has a trusted publisher registered for .github/workflows/release.yml (see docs/operations/release.md)." >&2
+            exit 1
+          fi
+
+  publish_aur:
+    name: Publish AUR package
+    needs: [preflight, release]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel != 'preview' }}
+    uses: ./.github/workflows/publish-aur.yml
     with:
-      tag: ${{ needs.metadata.outputs.tag }}
+      release_tag: ${{ needs.preflight.outputs.tag }}
+    secrets:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+
+  # Vercel builds the hosted web app while the desktop jobs run. `--skip-domain`
+  # keeps the custom domains (the channel and router domains) on the previous
+  # deployment until deploy_web aliases them, after the GitHub Release. It does
+  # still move the project's own *.vercel.app production hostname at build time.
+  # That hostname sits behind Vercel SSO and is not a user channel, so the
+  # npm-before-client order in docs/operations/release.md holds for users.
+  build_web:
+    name: Build hosted web app
+    needs: [preflight, relay_public_config]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.preflight.outputs.release_channel != 'preview' }}
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
+    outputs:
+      deployment_url: ${{ steps.deploy.outputs.deployment_url }}
+    env:
+      T3CODE_CLERK_PUBLISHABLE_KEY: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
+      T3CODE_CLERK_JWT_TEMPLATE: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
+      T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
+      T3CODE_RELAY_URL: ${{ needs.relay_public_config.outputs.relay_url }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      T3CODE_WEB_ROUTER_URL: ${{ vars.T3CODE_WEB_ROUTER_URL }}
+      VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/scripts... --filter=@t3tools/web...
+
+      - name: Download relay client tracing config
+        uses: actions/download-artifact@v8
+        with:
+          name: relay-client-tracing-config
+          path: ${{ runner.temp }}/relay-client-tracing
+
+      - name: Load relay client tracing config
+        shell: bash
+        run: |
+          config_path="$RUNNER_TEMP/relay-client-tracing/relay-client-tracing.env"
+          tracing_token="$(sed -n 's/^T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=//p' "$config_path")"
+          echo "::add-mask::$tracing_token"
+          cat "$config_path" >> "$GITHUB_ENV"
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
+
+      - name: Refresh release lockfile
+        run: vp install --lockfile-only --ignore-scripts
+
+      - id: deploy
+        name: Build staged deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${VERCEL_TOKEN:-}" || -z "${VERCEL_ORG_ID:-}" || -z "${VERCEL_PROJECT_ID:-}" ]]; then
+            echo "Missing one or more required Vercel secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID." >&2
+            exit 1
+          fi
+
+          router_url="${T3CODE_WEB_ROUTER_URL:-https://app.t3.codes}"
+          if [[ "${{ needs.preflight.outputs.release_channel }}" == "stable" ]]; then
+            channel_name="latest"
+          else
+            channel_name="nightly"
+          fi
+
+          echo "Building hosted web app for $channel_name channel."
+          deployment_output="$(
+            vp dlx vercel@53.1.1 deploy \
+              --archive=tgz \
+              --prod \
+              --skip-domain \
+              --yes \
+              --token "$VERCEL_TOKEN" \
+              --scope "${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}" \
+              --build-env "APP_VERSION=${{ needs.preflight.outputs.version }}" \
+              --build-env "T3CODE_CLERK_PUBLISHABLE_KEY=${T3CODE_CLERK_PUBLISHABLE_KEY:-}" \
+              --build-env "T3CODE_CLERK_JWT_TEMPLATE=${T3CODE_CLERK_JWT_TEMPLATE:-}" \
+              --build-env "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID=${T3CODE_CLERK_CLI_OAUTH_CLIENT_ID:-}" \
+              --build-env "T3CODE_RELAY_URL=${T3CODE_RELAY_URL:-}" \
+              --build-env "T3CODE_RELAY_CLIENT_OTLP_TRACES_URL=${T3CODE_RELAY_CLIENT_OTLP_TRACES_URL:-}" \
+              --build-env "T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET=${T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET:-}" \
+              --build-env "T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=${T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN:-}" \
+              --build-env "VITE_HOSTED_APP_URL=$router_url" \
+              --build-env "VITE_HOSTED_APP_CHANNEL=$channel_name"
+          )"
+          printf '%s\n' "$deployment_output"
+          # Vercel can print lockfile warnings to stdout before the deployment URL.
+          deployment_url="$(printf '%s\n' "$deployment_output" | grep -E '^https://[[:alnum:].-]+\.vercel\.app$')"
+          if [[ "$deployment_url" == *$'\n'* ]]; then
+            echo "Vercel returned multiple deployment URLs." >&2
+            exit 1
+          fi
+          echo "Staged $deployment_url."
+          echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
+
+  deploy_web:
+    name: Deploy hosted web app
+    needs: [preflight, build_web, release, publish_cli]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build_web.result == 'success' && needs.release.result == 'success' && needs.publish_cli.result == 'success' && needs.preflight.outputs.release_channel != 'preview' }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    env:
+      DEPLOYMENT_URL: ${{ needs.build_web.outputs.deployment_url }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      T3CODE_WEB_ROUTER_URL: ${{ vars.T3CODE_WEB_ROUTER_URL }}
+      T3CODE_WEB_LATEST_DOMAIN: ${{ vars.T3CODE_WEB_LATEST_DOMAIN }}
+      T3CODE_WEB_NIGHTLY_DOMAIN: ${{ vars.T3CODE_WEB_NIGHTLY_DOMAIN }}
+      VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install: false
+
+      - name: Alias channel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$DEPLOYMENT_URL" ]]; then
+            echo "Build hosted web app did not report a deployment URL." >&2
+            exit 1
+          fi
+
+          router_url="${T3CODE_WEB_ROUTER_URL:-https://app.t3.codes}"
+          latest_domain="${T3CODE_WEB_LATEST_DOMAIN:-latest.app.t3.codes}"
+          nightly_domain="${T3CODE_WEB_NIGHTLY_DOMAIN:-nightly.app.t3.codes}"
+          router_domain="${router_url#http://}"
+          router_domain="${router_domain#https://}"
+          router_domain="${router_domain%%/*}"
+
+          if [[ "${{ needs.preflight.outputs.release_channel }}" == "stable" ]]; then
+            channel_domain="$latest_domain"
+            channel_name="latest"
+          else
+            channel_domain="$nightly_domain"
+            channel_name="nightly"
+          fi
+
+          vercel_scope_args=(--scope "${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}")
+
+          echo "Aliasing $DEPLOYMENT_URL to $channel_domain."
+          vp dlx vercel@53.1.1 alias set "$DEPLOYMENT_URL" "$channel_domain" \
+            --token "$VERCEL_TOKEN" \
+            "${vercel_scope_args[@]}"
+
+          if [[ "$channel_name" == "latest" && -n "$router_domain" && "$router_domain" != "$channel_domain" ]]; then
+            echo "Aliasing $DEPLOYMENT_URL to router domain $router_domain."
+            vp dlx vercel@53.1.1 alias set "$DEPLOYMENT_URL" "$router_domain" \
+              --token "$VERCEL_TOKEN" \
+              "${vercel_scope_args[@]}"
+          fi
+
+  # Same split as the web app: build a production deployment early, then
+  # promote it to t3.codes once the release it links to exists. As above, the
+  # project's own *.vercel.app hostname moves at build time.
+  build_marketing:
+    name: Build marketing site
+    needs: [preflight]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.preflight.outputs.release_channel == 'nightly' }}
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
+    outputs:
+      deployment_url: ${{ steps.deploy.outputs.deployment_url }}
+      project_id: ${{ steps.deploy.outputs.project_id }}
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/marketing...
+
+      - id: deploy
+        name: Build staged deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${VERCEL_TOKEN:-}" || -z "${VERCEL_ORG_ID:-}" ]]; then
+            echo "Missing one or more required Vercel secrets: VERCEL_TOKEN, VERCEL_ORG_ID." >&2
+            exit 1
+          fi
+
+          VERCEL_PROJECT_ID="$(
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer $VERCEL_TOKEN" \
+              "https://api.vercel.com/v9/projects/t3code-marketing?teamId=$VERCEL_ORG_ID" \
+              | jq --exit-status --raw-output '.id'
+          )"
+          export VERCEL_PROJECT_ID
+
+          deployment_output="$(
+            vp dlx vercel@53.1.1 deploy \
+              --archive=tgz \
+              --prod \
+              --skip-domain \
+              --yes \
+              --token "$VERCEL_TOKEN" \
+              --scope "${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}"
+          )"
+          printf '%s\n' "$deployment_output"
+          # Vercel can print lockfile warnings to stdout before the deployment URL.
+          deployment_url="$(printf '%s\n' "$deployment_output" | grep -E '^https://[[:alnum:].-]+\.vercel\.app$')"
+          if [[ "$deployment_url" == *$'\n'* ]]; then
+            echo "Vercel returned multiple deployment URLs." >&2
+            exit 1
+          fi
+          echo "Staged $deployment_url."
+          echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
+          echo "project_id=$VERCEL_PROJECT_ID" >> "$GITHUB_OUTPUT"
+
+  deploy_marketing:
+    name: Deploy marketing site
+    needs: [preflight, build_marketing, release]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build_marketing.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel == 'nightly' }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    env:
+      DEPLOYMENT_URL: ${{ needs.build_marketing.outputs.deployment_url }}
+      VERCEL_PROJECT_ID: ${{ needs.build_marketing.outputs.project_id }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install: false
+
+      - name: Promote marketing site
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$DEPLOYMENT_URL" ]]; then
+            echo "Build marketing site did not report a deployment URL." >&2
+            exit 1
+          fi
+
+          echo "Promoting $DEPLOYMENT_URL."
+          vp dlx vercel@53.1.1 promote "$DEPLOYMENT_URL" \
+            --yes \
+            --token "$VERCEL_TOKEN" \
+            --scope "${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}"
+
+  finalize:
+    name: Finalize release
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel == 'stable' }}
+    needs: [preflight, release]
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - id: app_token
+        name: Mint release app token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app_token.outputs.token }}
+          persist-credentials: true
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - id: app_bot
+        name: Resolve GitHub App bot identity
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+        run: |
+          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
+          echo "email=${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/scripts... --filter=@t3tools/oxlint-plugin-t3code...
+
+      - id: update_versions
+        name: Update version strings
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/update-release-package-versions.ts "$RELEASE_VERSION" --github-output
+
+      - name: Format package.json files
+        if: steps.update_versions.outputs.changed == 'true'
+        run: vp fmt apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
+
+      - name: Refresh lockfile
+        if: steps.update_versions.outputs.changed == 'true'
+        run: vp install --lockfile-only --ignore-scripts
+
+      - name: Commit and push version bump
+        if: steps.update_versions.outputs.changed == 'true'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          if git diff --quiet -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json pnpm-lock.yaml; then
+            echo "No version changes to commit."
+            exit 0
+          fi
+
+          git config user.name "${{ steps.app_bot.outputs.name }}"
+          git config user.email "${{ steps.app_bot.outputs.email }}"
+
+          git add apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json pnpm-lock.yaml
+          git commit -m "chore(release): prepare $RELEASE_TAG"
+          git push origin HEAD:main
+
+  announce_discord:
+    name: Announce release on Discord
+    if: |
+      always() && !cancelled() &&
+      needs.preflight.result == 'success' &&
+      needs.preflight.outputs.release_channel != 'preview' &&
+      needs.relay_public_config.result == 'success' &&
+      needs.release.result == 'success' &&
+      needs.deploy_web.result == 'success' &&
+      (needs.finalize.result == 'success' || needs.finalize.result == 'skipped')
+    needs: [preflight, relay_public_config, release, deploy_web, finalize]
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/scripts...
+
+      - name: Read published release notes
+        if: needs.preflight.outputs.is_prerelease == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          RELEASE_CHANNEL: ${{ needs.preflight.outputs.release_channel }}
+        run: |
+          if [ "$RELEASE_CHANNEL" = 'nightly' ]; then
+            if ! gh release view "$RELEASE_TAG" --json body --jq '.body // ""' > "$RUNNER_TEMP/discord-release-notes.md"; then
+              : > "$RUNNER_TEMP/discord-release-notes.md"
+              echo '::warning::Could not read published release notes; announcing without a changelog.'
+            fi
+          else
+            : > "$RUNNER_TEMP/discord-release-notes.md"
+          fi
+
+      - name: Announce prerelease on Discord
+        if: needs.preflight.outputs.is_prerelease == 'true'
+        continue-on-error: true
+        env:
+          DISCORD_MENTION_ROLE_ID: ${{ secrets.DISCORD_RELEASE_NIGHTLY_ROLE_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          node scripts/notify-discord-release.ts prerelease \
+            --role-id "$DISCORD_MENTION_ROLE_ID" \
+            --release-name "${{ needs.preflight.outputs.release_name }}" \
+            --release-version "${{ needs.preflight.outputs.version }}" \
+            --tag "${{ needs.preflight.outputs.tag }}" \
+            --release-url "https://github.com/${{ github.repository }}/releases/tag/${{ needs.preflight.outputs.tag }}" \
+            --release-notes-file "$RUNNER_TEMP/discord-release-notes.md"
+
+      - name: Announce latest release on Discord
+        if: needs.preflight.outputs.make_latest == 'true'
+        continue-on-error: true
+        env:
+          DISCORD_MENTION_ROLE_ID: ${{ secrets.DISCORD_RELEASE_LATEST_ROLE_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          node scripts/notify-discord-release.ts latest \
+            --role-id "$DISCORD_MENTION_ROLE_ID" \
+            --release-name "${{ needs.preflight.outputs.release_name }}" \
+            --release-version "${{ needs.preflight.outputs.version }}" \
+            --tag "${{ needs.preflight.outputs.tag }}" \
+            --release-url "https://github.com/${{ github.repository }}/releases/tag/${{ needs.preflight.outputs.tag }}"
