@@ -28,7 +28,7 @@ function Mail() {
   // refresh or from the user pressing Read Apple Mail.
   const describe = (status: { status?: string; error?: string | null; error_class?: string | null; last_scan_at?: string | null }) => {
     if (status.error_class === "permission_pending") {
-      return "macOS needs your OK for Heiwa to read Mail. Allow the ‘Heiwa wants to control Mail’ prompt, or enable it under System Settings › Privacy & Security › Automation, then click Read Apple Mail again.";
+      return "Mail has not completed a read yet. Check for an Automation prompt, then try Read Apple Mail again.";
     }
     if (status.status === "error" || status.status === "backoff" || status.status === "skipped") {
       if (status.error_class === "timeout") return "Mail sync timed out; try Read Apple Mail again.";

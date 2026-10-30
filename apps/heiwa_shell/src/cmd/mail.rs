@@ -518,7 +518,7 @@ fn scan(args: &[String]) -> Result<()> {
         Err(error) => {
             saved.error = Some(error.to_string());
             let _ = save_mail_sync_state(&saved);
-            let error_class = scan_error_class(&error.to_string(), saved.consented_at);
+            let error_class = mail_error_class(&error.to_string());
             let payload = json!({"status":"error","error_class":error_class,"sources":[{"source":"apple","status":"error","error":error.to_string(),"error_class":error_class}],"fetched":0,"appended":0,"updated":0,"removed":0});
             return print_scan_payload(payload, json_output);
         }
@@ -605,18 +605,6 @@ fn mail_error_class(error: &str) -> &'static str {
         "automation_denied"
     } else {
         "failed"
-    }
-}
-
-fn scan_error_class(
-    error: &str,
-    consented_at: Option<chrono::DateTime<chrono::Utc>>,
-) -> &'static str {
-    let class = mail_error_class(error);
-    if class == "timeout" && consented_at.is_none() {
-        "permission_pending"
-    } else {
-        class
     }
 }
 
@@ -1627,19 +1615,9 @@ mod tests {
     }
 
     #[test]
-    fn first_run_timeout_is_permission_pending_but_later_timeout_is_timeout() {
+    fn a_read_timeout_does_not_claim_that_permission_is_pending() {
         assert_eq!(
-            scan_error_class(
-                "The local resource did not respond before the read timed out",
-                None
-            ),
-            "permission_pending"
-        );
-        assert_eq!(
-            scan_error_class(
-                "The local resource did not respond before the read timed out",
-                Some(chrono::Utc::now())
-            ),
+            mail_error_class("The local resource did not respond before the read timed out"),
             "timeout"
         );
     }

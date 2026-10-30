@@ -134,6 +134,9 @@ Live device tests must additionally bind the matching installed bundle and
 verify native persisted state. Unit tests alone are not that acceptance.
 
 No public promotion/release is implied. Mail remains a concrete live blocker.
+Its read still timed out with Automation and Full Disk Access enabled. A first
+timeout is now reported as a timeout, rather than inferred permission denial or
+pending consent. No Mail body/send capability is inferred from these grants.
 The CLI app-server dynamic-tool interface is experimental and version-sensitive;
 unknown methods/features must produce a visible failure, never a silent legacy
 execution fallback.
