@@ -45,6 +45,13 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   # Move rather than copy: the target directory may be shared with a checkout
   # at another revision, which must not find this bundle and install it as its own.
   mv "$bundle" "$out/Heiwa.app"
+  # File Provider/Finder can attach these attributes when the generated bundle
+  # enters an output folder. They invalidate strict code-signature checks.
+  # Remove only signing-prohibited metadata; preserve security attributes.
+  for attribute in com.apple.FinderInfo com.apple.ResourceFork; do
+    /usr/bin/xattr -dr "$attribute" "$out/Heiwa.app" 2>/dev/null || true
+  done
+  /usr/bin/codesign --verify --deep --strict "$out/Heiwa.app"
   resources="$out/Heiwa.app/Contents/Resources/resources"
   cp "$resources/heiwa" "$out/heiwa"
   if [[ -f "$resources/heiwa-apple-resources" ]]; then
