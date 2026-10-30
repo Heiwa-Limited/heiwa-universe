@@ -227,17 +227,10 @@ if [ "$os" = "Darwin" ] && [ -n "$app_expected" ]; then
   [ -x "$tmp_dir/Heiwa.app/Contents/MacOS/Heiwa" ] ||
     fail "desktop archive does not contain an executable app bundle"
 
-  # Deliberately not $app_dir/Heiwa.app: `heiwa install` runs later in this
-  # script and writes its own launcher shim to that path. Two different things
-  # cannot own one path, and the runtime's bootstrap is not this installer's
-  # to redefine. /Applications is also where a user's app belongs -- it is the
-  # only location that reaches Spotlight and Launchpad.
-  if [ -w /Applications ]; then
-    applications_dir="/Applications"
-  else
-    applications_dir="$HOME/Applications"
-    mkdir -p "$applications_dir"
-  fi
+  # One per-user native app. The runtime path below is a compatibility
+  # alias, so bootstrap and future updates share this bundle's ownership.
+  applications_dir="$HOME/Applications"
+  mkdir -p "$applications_dir"
 
   staged_bundle="$applications_dir/.Heiwa.app.new.$$"
   rm -rf -- "$staged_bundle"
@@ -245,6 +238,14 @@ if [ "$os" = "Darwin" ] && [ -n "$app_expected" ]; then
     rm -rf -- "$applications_dir/Heiwa.app"
     mv "$staged_bundle" "$applications_dir/Heiwa.app"
     installed_app="$applications_dir/Heiwa.app"
+    legacy_bundle="$app_dir/Heiwa.app"
+    if [ -L "$legacy_bundle" ]; then
+      rm "$legacy_bundle"
+    elif [ -e "$legacy_bundle" ]; then
+      # Retain the previous launcher for recovery without another .app.
+      mv "$legacy_bundle" "$app_dir/.Heiwa-before-canonical.$$"
+    fi
+    ln -s "$installed_app" "$legacy_bundle"
   else
     rm -rf -- "$staged_bundle"
     echo "heiwa install: could not write $applications_dir; skipped the app" >&2

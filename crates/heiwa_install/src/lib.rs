@@ -704,11 +704,27 @@ fn write_home_app_launcher(heiwa_dir: &Path) -> Result<()> {
 }
 
 fn write_home_app_launcher_internal(heiwa_dir: &Path) -> Result<()> {
-    if let Some(desktop_bundle) = find_built_desktop_app_bundle() {
-        return install_desktop_app_bundle(heiwa_dir, &desktop_bundle);
+    write_home_app_launcher_from(heiwa_dir, find_built_desktop_app_bundle().as_deref())
+}
+
+fn write_home_app_launcher_from(heiwa_dir: &Path, desktop_bundle: Option<&Path>) -> Result<()> {
+    if let Some(desktop_bundle) = desktop_bundle {
+        return install_desktop_app_bundle(heiwa_dir, desktop_bundle);
     }
 
     let bundle_root = heiwa_dir.join("app").join("Heiwa.app");
+    // A native app installed in ~/Applications owns its signed executable.
+    // Bootstrap must not replace it with the legacy shell launcher through
+    // the compatibility symlink.
+    if fs::symlink_metadata(&bundle_root).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        let executable = bundle_root.join("Contents/MacOS/Heiwa");
+        if !executable.is_file() {
+            return Err(anyhow!(
+                "Heiwa.app alias has no executable; repair the desktop installation"
+            ));
+        }
+        return write_app_binary_launcher(heiwa_dir, &executable);
+    }
     let contents_dir = bundle_root.join("Contents");
     let macos_dir = contents_dir.join("MacOS");
     let resources_dir = contents_dir.join("Resources");
@@ -802,8 +818,36 @@ fn find_built_desktop_app_bundle() -> Option<PathBuf> {
 }
 
 pub fn install_desktop_app_bundle(heiwa_dir: &Path, desktop_bundle: &Path) -> Result<()> {
-    let app_root = heiwa_dir.join("app");
-    let target_bundle = app_root.join("Heiwa.app");
+    let alias = heiwa_dir.join("app/Heiwa.app");
+    // Preserve the owner's canonical application location on subsequent
+    // checkout/dev updates instead of replacing its alias with a second app.
+    let target_bundle =
+        if fs::symlink_metadata(&alias).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            // Resolve the parent, not the final bundle: after an interrupted
+            // rename the app can be absent while its recovery backup exists.
+            let link = fs::read_link(&alias).context("read installed Heiwa.app alias")?;
+            let destination = if link.is_absolute() {
+                link
+            } else {
+                alias.parent().expect("alias parent").join(link)
+            };
+            let parent = destination.parent().context("Heiwa.app alias parent")?;
+            fs::canonicalize(parent)
+                .context("resolve installed Heiwa.app directory")?
+                .join(destination.file_name().context("Heiwa.app alias name")?)
+        } else {
+            alias
+        };
+    if target_bundle.file_name().and_then(|name| name.to_str()) != Some("Heiwa.app") {
+        return Err(anyhow!("installed app alias must resolve to Heiwa.app"));
+    }
+    if fs::symlink_metadata(&target_bundle).is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err(anyhow!(
+            "installed app alias must point directly to a Heiwa.app bundle"
+        ));
+    }
+    let app_root = target_bundle.parent().context("Heiwa.app parent")?;
     let staging_bundle = app_root.join(".Heiwa.app.installing");
     let backup_bundle = app_root.join(".Heiwa.app.previous");
     fs::create_dir_all(&app_root)?;
@@ -886,7 +930,10 @@ pub fn install_desktop_app_bundle(heiwa_dir: &Path, desktop_bundle: &Path) -> Re
     }
 
     let executable_path = target_bundle.join("Contents").join("MacOS").join("Heiwa");
+    write_app_binary_launcher(heiwa_dir, &executable_path)
+}
 
+fn write_app_binary_launcher(heiwa_dir: &Path, executable_path: &Path) -> Result<()> {
     let bin_launcher_path = heiwa_dir.join("bin").join("heiwa-app");
     fs::create_dir_all(bin_launcher_path.parent().expect("launcher parent"))?;
     let bin_launcher = format!(
@@ -1279,6 +1326,70 @@ mod tests {
     // The desktop bundle install writes a zsh shim with POSIX paths; on
     // Windows the joined paths render with backslashes and the flow itself
     // is macOS-only, so keep the test off Windows.
+    #[test]
+    #[cfg(unix)]
+    fn canonical_app_alias_survives_bootstrap_updates_and_interrupted_recovery() -> Result<()> {
+        use std::os::unix::fs::symlink;
+        let tmp = tempdir()?;
+        let root = tmp.path().join(".heiwa");
+        let canonical = tmp.path().join("Applications/Heiwa.app");
+        let alias = root.join("app/Heiwa.app");
+        fs::create_dir_all(canonical.join("Contents/MacOS"))?;
+        fs::create_dir_all(root.join("app"))?;
+        fs::create_dir_all(root.join("bin"))?;
+        fs::write(
+            canonical.join("Contents/MacOS/Heiwa"),
+            "signed native binary",
+        )?;
+        symlink(&canonical, &alias)?;
+
+        write_home_app_launcher_from(&root, None)?;
+        assert_eq!(
+            fs::read_to_string(canonical.join("Contents/MacOS/Heiwa"))?,
+            "signed native binary"
+        );
+        assert!(fs::symlink_metadata(&alias)?.file_type().is_symlink());
+
+        let source = tmp.path().join("build/Heiwa.app");
+        fs::create_dir_all(source.join("Contents/MacOS"))?;
+        fs::write(source.join("Contents/MacOS/Heiwa"), "updated native binary")?;
+        install_desktop_app_bundle(&root, &source)?;
+        assert_eq!(
+            fs::read_to_string(canonical.join("Contents/MacOS/Heiwa"))?,
+            "updated native binary"
+        );
+        assert!(fs::symlink_metadata(&alias)?.file_type().is_symlink());
+
+        fs::rename(
+            &canonical,
+            canonical.parent().unwrap().join(".Heiwa.app.previous"),
+        )?;
+        install_desktop_app_bundle(&root, &tmp.path().join("missing/Heiwa.app"))
+            .expect_err("invalid source still restores the canonical backup");
+        assert_eq!(
+            fs::read_to_string(canonical.join("Contents/MacOS/Heiwa"))?,
+            "updated native binary"
+        );
+        assert!(fs::symlink_metadata(&alias)?.file_type().is_symlink());
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn app_update_refuses_aliases_to_unrelated_bundles() -> Result<()> {
+        let tmp = tempdir()?;
+        let root = tmp.path().join(".heiwa");
+        let unrelated = tmp.path().join("Applications/Other.app");
+        fs::create_dir_all(&unrelated)?;
+        fs::create_dir_all(root.join("app"))?;
+        fs::write(unrelated.join("sentinel"), "preserve")?;
+        std::os::unix::fs::symlink(&unrelated, root.join("app/Heiwa.app"))?;
+        install_desktop_app_bundle(&root, Path::new("missing/Heiwa.app"))
+            .expect_err("an alias must never overwrite another application");
+        assert_eq!(fs::read_to_string(unrelated.join("sentinel"))?, "preserve");
+        Ok(())
+    }
+
     #[test]
     #[cfg(not(windows))]
     fn test_install_built_desktop_app_bundle_copies_tauri_bundle_and_shim() -> Result<()> {

@@ -39,6 +39,12 @@ disabled until a redaction and privacy boundary exists.
 
 ## Install and Update Authority
 
+The per-user macOS application lives at `~/Applications/Heiwa.app`.
+`<runtime-root>/app/Heiwa.app` may be a compatibility symlink to that same
+bundle. Bootstrap and dev updates must preserve this alias rather than create
+a second installed app. See [packaged workflows](packaged-workflows.md) for the
+bounded `heiwa workflows` read interface and its freshness contract.
+
 GitHub and Cloudflare form the public install source, but they do not have the
 same authority.
 

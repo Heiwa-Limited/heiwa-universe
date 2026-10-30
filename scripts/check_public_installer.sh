@@ -44,4 +44,5 @@ for forbidden in HEIWA_PRIVATE_TOKEN 'cargo install' 'git clone' 'checkout --for
 done
 
 shellcheck -s sh "$installer"
+bash scripts/tests/test_native_app_location.sh
 echo "Public release installer checks passed."

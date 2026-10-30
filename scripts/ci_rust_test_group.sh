@@ -71,6 +71,7 @@ shell_ops_targets=(
   smoke
   work_fabric_a1
   work_run
+  workflows
 )
 
 runtime_a_targets=(

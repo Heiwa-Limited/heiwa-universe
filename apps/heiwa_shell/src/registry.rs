@@ -129,6 +129,14 @@ pub const COMMANDS: &[CommandSpec] = &[
     },
     command("receipts", "receipts", "Show run receipt status"),
     command("cost", "cost", "Token and cost totals from local receipts"),
+    CommandSpec {
+        v1: &["workflows list", "workflows show", "workflows run"],
+        ..command(
+            "workflows",
+            "workflows list|show|run [--json]",
+            "Reusable, bounded workflows without model calls",
+        )
+    },
     command(
         "compress",
         "compress [--text|--file] [--json]",

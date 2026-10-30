@@ -26,4 +26,5 @@ pub(crate) mod update_channel;
 pub mod work;
 pub mod worker;
 pub mod workers;
+pub mod workflows;
 pub mod workspace;
