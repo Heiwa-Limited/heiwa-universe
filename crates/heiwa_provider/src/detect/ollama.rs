@@ -30,6 +30,20 @@ impl OllamaEndpoint {
     }
 }
 
+pub fn endpoint_is_on_device(endpoint: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(endpoint) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_matches(['[', ']'])
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum EndpointError {
     #[error("HEIWA_OLLAMA_BASE is not valid Unicode")]
@@ -241,6 +255,9 @@ async fn detect_models_at_endpoint(
             Err(_) => infer_capability_flags_from_name(&m.name),
         };
 
+        if !capability_flags.supports_streaming {
+            continue;
+        }
         detected_models.push(DetectedModel {
             model_id: m.name.clone(),
             provider_model_id: m.name,
@@ -256,7 +273,11 @@ async fn detect_models_at_endpoint(
             // Local inference: 0.0 is the real rate, not a placeholder.
             cost_per_1k_input: 0.0,
             cost_per_1k_output: 0.0,
-            price_truth: PriceTruth::Known,
+            price_truth: if endpoint_is_on_device(endpoint.as_str()) {
+                PriceTruth::Known
+            } else {
+                PriceTruth::Unknown
+            },
             inventory_truth: InventoryTruth::Verified,
         });
     }
@@ -351,11 +372,12 @@ async fn fetch_capability_flags(
 
 fn capability_flags_from_list(capabilities: &[String]) -> CapabilityFlags {
     let has = |needle: &str| capabilities.iter().any(|item| item == needle);
-    let supports_streaming =
-        has("completion") || has("thinking") || has("vision") || has("audio") || has("tools");
+    let supports_streaming = has("completion")
+        || (!has("embedding")
+            && (has("thinking") || has("vision") || has("audio") || has("tools")));
     CapabilityFlags {
         supports_streaming,
-        supports_tools: has("tools"),
+        supports_tools: supports_streaming && has("tools"),
         supports_vision: has("vision"),
         supports_audio: has("audio"),
     }
@@ -374,6 +396,24 @@ fn infer_capability_flags_from_name(name: &str) -> CapabilityFlags {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn on_device_requires_loopback_and_embedding_tool_flags_do_not_admit_chat() {
+        for endpoint in [
+            "http://127.0.0.1:11434",
+            "http://localhost:11434",
+            "http://[::1]:11434",
+        ] {
+            assert!(endpoint_is_on_device(endpoint));
+        }
+        for endpoint in ["https://models.example", "http://192.168.1.20:11434"] {
+            assert!(!endpoint_is_on_device(endpoint));
+        }
+        let flags =
+            capability_flags_from_list(&["embedding".into(), "thinking".into(), "tools".into()]);
+        assert!(!flags.supports_streaming);
+        assert!(!flags.supports_tools);
+    }
 
     #[test]
     fn parse_param_billions_from_detail() {

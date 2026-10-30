@@ -301,7 +301,44 @@ mod model_call {
             max_attempts,
             cancel,
             delta_tx: None,
+            tools: Default::default(),
         }
+    }
+
+    #[tokio::test]
+    async fn native_api_tool_batch_is_one_valid_plan_with_structured_arguments() {
+        let (_evidence, service, submission) = service_and_turn();
+        let adapter: Arc<dyn ProviderAdapter> = Arc::new(EventAdapter {
+            events: vec![
+                StreamEvent::Token("Checking both files".into()),
+                StreamEvent::ToolUse {
+                    name: "fs.read".into(),
+                    input: r#"{"path":"one.txt"}"#.into(),
+                },
+                StreamEvent::ToolUse {
+                    name: "fs.read".into(),
+                    input: r#"{"path":"two.txt"}"#.into(),
+                },
+                StreamEvent::Done(TokenUsage::default()),
+            ],
+        });
+        let executor = ModelCallExecutor::new(
+            Arc::new(move |_: &str, _: &str| Some(adapter.clone())),
+            service,
+        );
+        let (_cancel, cancel) = watch::channel(false);
+        let result = executor
+            .execute(execution(
+                request("thread-1", &submission.turn_id),
+                vec![candidate(1, "api", "model", 0.0)],
+                1,
+                cancel,
+            ))
+            .await
+            .unwrap();
+        let plan: serde_json::Value = serde_json::from_str(&result.text).unwrap();
+        assert_eq!(plan["tool_calls"].as_array().unwrap().len(), 2);
+        assert_eq!(plan["tool_calls"][1]["arguments"]["path"], "two.txt");
     }
 
     #[tokio::test]
@@ -365,6 +402,7 @@ mod model_call {
                 max_attempts: 3,
                 cancel: cancel_rx,
                 delta_tx: None,
+                tools: Default::default(),
             })
             .await
             .unwrap();

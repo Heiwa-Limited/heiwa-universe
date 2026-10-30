@@ -1,94 +1,116 @@
 #![cfg(unix)]
-
-use heiwa_provider::adapter::{Message, Role, StreamEvent};
+//! Exercise the public admitted adapter, not the raw transport: the admission
+//! wrapper must preserve host tools and cancellation across provider launchers.
+use heiwa_provider::adapter::{
+    Message, ProviderTools, Role, StreamEvent, ToolDefinition, ToolResponse,
+};
 use heiwa_provider::{
     AccountRegistry, AccountStatus, Credential, DetectedModel, InventoryTruth, PriceTruth,
     ProviderAccount,
 };
-use serde_json::{json, Value};
-use std::fs;
+use serde_json::json;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
-
-struct Fixture(PathBuf);
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        fs::remove_dir_all(&self.0).ok();
-    }
+static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+struct Fixture {
+    _root: tempfile::TempDir,
+    binary: String,
+    pid: std::path::PathBuf,
+    old_path: Option<std::ffi::OsString>,
+    _guard: std::sync::MutexGuard<'static, ()>,
 }
-
-// Exercise the public adapter in a child test process, so PATH and HOME cannot
-// race other tests or discover the operator's real Codex installation/auth.
-fn run_fixture(script: Option<&str>, cancel: bool) -> Value {
-    let fixture = Fixture(std::env::temp_dir().join(format!(
-        "heiwa-codex-stream-{}-{}",
-        std::process::id(),
-        NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
-    )));
-    fs::create_dir_all(&fixture.0).unwrap();
-    if let Some(script) = script {
-        let executable = fixture.0.join("codex");
-        fs::write(
-            &executable,
-            format!("#!/bin/sh\nprintf '%s' \"$$\" > \"$HEIWA_CODEX_FIXTURE/pid\"\n{script}\n"),
-        )
-        .unwrap();
-        fs::set_permissions(executable, fs::Permissions::from_mode(0o700)).unwrap();
-    }
-    let output = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "codex_fixture_driver", "--nocapture"])
-        .env_clear()
-        .env("PATH", &fixture.0)
-        .env("HOME", &fixture.0)
-        .env("HEIWA_HOME", fixture.0.join("runtime"))
-        .env("HEIWA_BIN_DIRS", "")
-        .env("HEIWA_CODEX_FIXTURE", &fixture.0)
-        .env("HEIWA_CODEX_CANCEL", if cancel { "1" } else { "0" })
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "fixture driver failed: {} {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    if let Ok(pid) = fs::read_to_string(fixture.0.join("pid")) {
-        assert!(
-            !Command::new("/bin/kill")
-                .args(["-0", &pid])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .unwrap()
-                .success(),
-            "provider process {pid} outlived its adapter"
+impl Fixture {
+    fn new(mode: &str) -> Self {
+        let guard = ENV.lock().unwrap_or_else(|poison| poison.into_inner());
+        let old_path = std::env::var_os("PATH");
+        let root = tempfile::tempdir().unwrap();
+        std::env::set_var("PATH", root.path());
+        let binary = root.path().join("codex");
+        let pid = root.path().join("pids");
+        let program = format!(
+            "#!/usr/bin/python3\nMODE={}\nPIDFILE={}\n",
+            json!(mode),
+            json!(pid)
         );
+        let body = r#"
+import json,os,sys,subprocess,time
+assert sys.argv[1:4] == ['app-server','--listen','stdio://']
+# No prompt or secret may be copied into argv.
+assert 'literal $(touch' not in ' '.join(sys.argv)
+def send(value):
+ print(json.dumps(value),flush=True)
+def response(value,result):
+ send({'id':value['id'],'result':result})
+with open(PIDFILE,'w') as f:f.write(str(os.getpid()))
+if MODE=='stderr':sys.stderr.write('x'*1000000);sys.stderr.flush()
+for line in sys.stdin:
+ value=json.loads(line);method=value.get('method');params=value.get('params',{})
+ if method=='initialize':
+  assert params['clientInfo']['name']=='heiwa'
+  assert params['capabilities']['experimentalApi']
+  response(value,{})
+ elif method=='account/read':
+  response(value,{'account':{'type':'apiKey' if MODE=='api-key' else 'chatgpt'}})
+ elif method=='config/read':
+  response(value,{'config':{'mcp_servers':{'unrelated':{'enabled':True,'command':'private-not-copied'}},'plugins':{'peer@vendor':{'enabled':True}}}})
+ elif method=='thread/start':
+  assert params['sandbox']=='read-only' and params['approvalPolicy']=='never'
+  assert params['config']['mcp_servers']['unrelated']['enabled'] is False
+  assert params['config']['plugins']['peer@vendor']['enabled'] is False
+  assert params['config']['features']['shell_tool'] is False
+  if MODE=='tools':assert params['dynamicTools'][0]['name']=='fs__read'
+  response(value,{'thread':{'id':'fixture-thread'},'modelProvider':'openai'})
+ elif method=='thread/inject_items':
+  assert [item['role'] for item in params['items']]==['user','assistant']
+  response(value,{})
+ elif method=='turn/start':
+  assert params['input'][0]['text']=='literal $(touch should-not-run) `not-code`'
+  if MODE=='eof':sys.exit(0)
+  if MODE=='invalid':os.write(1,b'not-json\n');continue
+  if MODE=='utf8':os.write(1,b'\xff\n');continue
+  if MODE=='failed':
+   send({'method':'turn/completed','params':{'turn':{'status':'failed','error':{'message':'fixture denied'}}}});continue
+  if MODE=='native':
+   send({'method':'item/started','params':{'item':{'type':'commandExecution'}}});continue
+  if MODE=='cancel':
+   child=subprocess.Popen(['/bin/sleep','30'])
+   with open(PIDFILE,'a') as f:f.write('\n'+str(child.pid))
+   continue
+  if MODE=='tools':
+   send({'id':'host-1','method':'item/tool/call','params':{'threadId':'fixture-thread','turnId':'turn','callId':'call-one','tool':'fs__read','arguments':{'path':'proof.txt'}}});continue
+  send({'method':'item/agentMessage/delta','params':{'itemId':'answer','delta':'verified answer'}})
+  send({'method':'item/completed','params':{'item':{'type':'agentMessage','id':'answer','text':'verified answer'}}})
+  send({'method':'thread/tokenUsage/updated','params':{'tokenUsage':{'total':{'inputTokens':11,'outputTokens':7,'cachedInputTokens':3}}}})
+  send({'method':'turn/completed','params':{'turn':{'status':'completed'}}})
+ elif value.get('id')=='host-1':
+  assert value['result']['success'] and value['result']['contentItems'][0]['text']=='fixture host content'
+  # A retransmitted call ID must reuse the result, never repeat the effect.
+  send({'id':'host-2','method':'item/tool/call','params':{'threadId':'fixture-thread','turnId':'turn','callId':'call-one','tool':'fs__read','arguments':{'path':'proof.txt'}}})
+ elif value.get('id')=='host-2':
+  send({'method':'item/agentMessage/delta','params':{'itemId':'answer','delta':'tool verified'}})
+  send({'method':'turn/completed','params':{'turn':{'status':'completed'}}})
+"#;
+        std::fs::write(&binary, program + body).unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
+        Self {
+            _root: root,
+            binary: "codex".into(),
+            old_path,
+            _guard: guard,
+            pid,
+        }
     }
-    serde_json::from_slice(&fs::read(fixture.0.join("result.json")).unwrap()).unwrap()
-}
-
-#[tokio::test]
-async fn codex_fixture_driver() {
-    let Some(root) = std::env::var_os("HEIWA_CODEX_FIXTURE") else {
-        return;
-    };
-    let (tx, mut rx) = mpsc::channel(32);
-    let send = async move {
+    fn adapter(&self) -> std::sync::Arc<dyn heiwa_provider::adapter::ProviderAdapter> {
         let model = DetectedModel {
-            model_id: "fixture-model".into(),
-            provider_model_id: "fixture-model".into(),
+            model_id: "fixture".into(),
+            provider_model_id: "fixture".into(),
             provider: "openai".into(),
-            account_id: "openai-cli-fixture".into(),
+            account_id: "fixture-account".into(),
             rate_group: "openai_sub".into(),
-            capability_class: 4,
-            context_window: 32_000,
+            capability_class: 3,
+            context_window: 32000,
             supports_streaming: true,
             supports_tools: true,
             supports_vision: false,
@@ -100,268 +122,216 @@ async fn codex_fixture_driver() {
         };
         let registry = AccountRegistry::from_accounts(vec![ProviderAccount {
             account_id: model.account_id.clone(),
-            provider: model.provider.clone(),
+            provider: "openai".into(),
             credential: Credential::OauthCli {
-                binary: "codex".into(),
+                binary: self.binary.clone(),
             },
-            rate_group: model.rate_group.clone(),
+            rate_group: "openai_sub".into(),
             status: AccountStatus::Connected,
             models: vec![model],
         }]);
-        let adapter = match heiwa_provider::routing::resolve_adapter_with(
-            &registry,
-            "codex",
-            "fixture-model",
-            None,
-        ) {
-            Ok(adapter) => adapter,
-            Err(error) => {
-                let _ = tx
-                    .send(StreamEvent::Error(format!(
-                        "Codex admission denied: {error}"
-                    )))
-                    .await;
-                return Err(anyhow::anyhow!("Codex admission denied: {error}"));
+        heiwa_provider::routing::resolve_adapter_with(&registry, "codex", "fixture", None).unwrap()
+    }
+    async fn assert_reaped(&self) {
+        if let Ok(pids) = std::fs::read_to_string(&self.pid) {
+            for _ in 0..100 {
+                let alive = pids.lines().any(|pid| {
+                    let output = std::process::Command::new("/bin/ps")
+                        .args(["-p", pid, "-o", "stat="])
+                        .output()
+                        .unwrap();
+                    output.status.success()
+                        && !String::from_utf8_lossy(&output.stdout)
+                            .trim()
+                            .starts_with('Z')
+                });
+                if !alive {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
-        };
-        adapter
-            .send(
-                "fixture-model",
-                &[Message {
-                    role: Role::User,
-                    content: "--prompt-is-data".into(),
-                }],
-                tx,
-            )
-            .await
-    };
-    let cancel = std::env::var("HEIWA_CODEX_CANCEL").unwrap() == "1";
-    let collect = async {
-        let mut events = Vec::new();
-        while let Some(event) = rx.recv().await {
-            events.push(event);
-            if cancel {
-                break;
-            }
+            panic!("provider launcher or descendant outlived the adapter");
         }
-        drop(rx);
-        events
-    };
-    let result = tokio::time::timeout(Duration::from_secs(5), async {
-        let (events, result) = tokio::join!(collect, send);
-        json!({"ok": result.is_ok(), "error": result.err().map(|e| e.to_string()), "events": events})
-    })
-    .await
-    .expect("Codex adapter hung");
-    fs::write(
-        PathBuf::from(root).join("result.json"),
-        serde_json::to_vec(&result).unwrap(),
+    }
+}
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        if let Some(value) = &self.old_path {
+            std::env::set_var("PATH", value);
+        } else {
+            std::env::remove_var("PATH");
+        }
+    }
+}
+fn messages() -> Vec<Message> {
+    vec![
+        Message {
+            role: Role::System,
+            content: "Heiwa test instructions".into(),
+        },
+        Message {
+            role: Role::User,
+            content: "prior user".into(),
+        },
+        Message {
+            role: Role::Assistant,
+            content: "prior assistant".into(),
+        },
+        Message {
+            role: Role::User,
+            content: "literal $(touch should-not-run) `not-code`".into(),
+        },
+    ]
+}
+async fn run(mode: &str) -> Vec<StreamEvent> {
+    let fixture = Fixture::new(mode);
+    let adapter = fixture.adapter();
+    let (tx, mut rx) = mpsc::channel(32);
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        adapter.send("fixture", &messages(), tx),
     )
+    .await
+    .unwrap()
     .unwrap();
+    let mut events = Vec::new();
+    while let Some(event) = rx.recv().await {
+        events.push(event);
+    }
+    fixture.assert_reaped().await;
+    events
 }
-
-fn assert_failure(result: &Value, expected: &str) {
-    assert_eq!(result["ok"], false, "{result}");
-    let events: Vec<StreamEvent> = serde_json::from_value(result["events"].clone()).unwrap();
-    let terminal: Vec<_> = events
-        .iter()
-        .filter(|event| matches!(event, StreamEvent::Done(_) | StreamEvent::Error(_)))
-        .collect();
-    assert_eq!(terminal.len(), 1, "{result}");
+#[tokio::test]
+async fn app_server_preserves_roles_text_usage_and_literal_input() {
+    let events = run("success").await;
+    assert_eq!(
+        events
+            .iter()
+            .filter_map(|e| if let StreamEvent::Token(t) = e {
+                Some(t.as_str())
+            } else {
+                None
+            })
+            .collect::<String>(),
+        "verified answer"
+    );
     assert!(
-        matches!(terminal[0], StreamEvent::Error(message) if message.contains(expected)),
-        "{result}"
+        matches!(events.last(),Some(StreamEvent::Done(u)) if u.input_tokens==11 && u.output_tokens==7 && u.cache_read_tokens==3)
     );
-    assert!(result["error"].as_str().unwrap().contains(expected));
-}
-
-#[test]
-fn current_codex_events_preserve_text_and_usage() {
-    let result = run_fixture(
-        Some(
-            r#"
-/bin/cat <<'JSONL'
-{"type":"thread.started","thread_id":"fixture-thread"}
-{"type":"turn.started"}
-{"type":"item.started","item":{"id":"a","type":"agent_message","text":"partial"}}
-{"type":"item.updated","item":{"id":"a","type":"agent_message","text":"partial update"}}
-{"type":"item.completed","item":{"id":"r","type":"reasoning","text":"private reasoning"}}
-{"type":"item.completed","item":{"id":"a","type":"agent_message","text":"Verified answer"}}
-{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":100,"output_tokens":12}}
-JSONL
-"#,
-        ),
-        false,
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, StreamEvent::Done(_) | StreamEvent::Error(_)))
+            .count(),
+        1
     );
-    assert_eq!(result["ok"], true, "{result}");
-    assert_eq!(result["events"].as_array().unwrap().len(), 2, "{result}");
-    assert_eq!(result["events"][0], json!({"Token": "Verified answer"}));
-    assert_eq!(result["events"][1]["Done"]["input_tokens"], 120);
-    assert_eq!(result["events"][1]["Done"]["output_tokens"], 12);
-    assert_eq!(result["events"][1]["Done"]["cache_read_tokens"], 100);
 }
-
-#[test]
-fn failed_turn_is_an_error_even_with_successful_exit() {
-    let result = run_fixture(
-        Some(r#"printf '%s\n' '{"type":"turn.failed","error":{"message":"quota exhausted"}}'"#),
-        false,
+#[tokio::test]
+async fn admission_wrapper_preserves_native_tools_and_retransmits_without_repeating_effects() {
+    let fixture = Fixture::new("tools");
+    let adapter = fixture.adapter();
+    let (tx, mut rx) = mpsc::channel(32);
+    let (requests, mut calls) = mpsc::channel::<heiwa_provider::adapter::ProviderToolRequest>(4);
+    let tools = ProviderTools {
+        definitions: vec![ToolDefinition {
+            name: "fs.read".into(),
+            description: "read fixture".into(),
+            input_schema: json!({"type":"object","properties":{"path":{"type":"string"}}}),
+        }],
+        requests: Some(requests),
+        ..Default::default()
+    };
+    let dispatcher = tokio::spawn(async move {
+        let mut count = 0;
+        while let Some(call) = calls.recv().await {
+            assert_eq!(call.name, "fs.read");
+            count += 1;
+            call.response
+                .send(ToolResponse {
+                    output: "fixture host content".into(),
+                    success: true,
+                })
+                .unwrap();
+        }
+        count
+    });
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        adapter.send_with_tools("fixture", &messages(), tx, tools),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let mut text = String::new();
+    let mut done = false;
+    while let Some(event) = rx.recv().await {
+        match event {
+            StreamEvent::Token(t) => text.push_str(&t),
+            StreamEvent::Done(_) => done = true,
+            StreamEvent::Error(e) => panic!("{e}"),
+            _ => {}
+        }
+    }
+    assert!(done);
+    assert_eq!(text, "tool verified");
+    assert_eq!(dispatcher.await.unwrap(), 1);
+    fixture.assert_reaped().await;
+}
+#[tokio::test]
+async fn malformed_failed_incomplete_and_native_action_streams_are_never_success() {
+    for mode in ["failed", "eof", "invalid", "utf8", "native", "api-key"] {
+        let events = run(mode).await;
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, StreamEvent::Error(_)))
+                .count(),
+            1,
+            "{mode}: {events:?}"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(e, StreamEvent::Done(_))),
+            "{mode}"
+        );
+    }
+}
+#[tokio::test]
+async fn stderr_cannot_block_the_protocol() {
+    assert!(matches!(
+        run("stderr").await.last(),
+        Some(StreamEvent::Done(_))
+    ));
+}
+#[tokio::test]
+async fn closed_consumer_stops_the_launcher_and_its_worker() {
+    let fixture = Fixture::new("cancel");
+    let adapter = fixture.adapter();
+    let (tx, rx) = mpsc::channel(8);
+    let message = messages();
+    let task = tokio::spawn(async move { adapter.send("fixture", &message, tx).await });
+    for _ in 0..100 {
+        if std::fs::read_to_string(&fixture.pid)
+            .unwrap_or_default()
+            .lines()
+            .count()
+            == 2
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        std::fs::read_to_string(&fixture.pid)
+            .unwrap()
+            .lines()
+            .count(),
+        2
     );
-    assert_failure(&result, "quota exhausted");
-}
-
-#[test]
-fn fatal_error_is_not_a_success() {
-    let result = run_fixture(
-        Some(r#"printf '%s\n' '{"type":"error","message":"authentication failed"}'; exit 1"#),
-        false,
-    );
-    assert_failure(&result, "authentication failed");
-}
-
-#[test]
-fn eof_without_completion_is_not_a_success() {
-    assert_failure(&run_fixture(Some("exit 0"), false), "completion");
-}
-
-#[test]
-fn nonzero_exit_overrides_completion() {
-    let result = run_fixture(
-        Some(r#"printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":7}}'; exit 9"#),
-        false,
-    );
-    assert_failure(&result, "9");
-}
-
-#[test]
-fn noisy_stderr_cannot_block_stdout() {
-    let result = run_fixture(
-        Some(
-            r#"
-i=0
-while [ "$i" -lt 10000 ]; do
-  printf '%s\n' 'provider diagnostic that must not enter the assistant transcript' >&2
-  i=$((i + 1))
-done
-printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":9}}'
-"#,
-        ),
-        false,
-    );
-    assert_eq!(result["ok"], true, "{result}");
-    assert_eq!(result["events"][0]["Done"]["input_tokens"], 9);
-}
-
-#[test]
-fn legacy_events_remain_supported() {
-    let result = run_fixture(
-        Some(
-            r#"
-printf '%s\n' '{"type":"agent_message_delta","delta":"legacy "}' '{"type":"message_delta","delta":"answer"}' '{"type":"task_complete","usage":{"output_tokens":2}}'
-"#,
-        ),
-        false,
-    );
-    assert_eq!(result["ok"], true, "{result}");
-    assert_eq!(result["events"][0], json!({"Token": "legacy "}));
-    assert_eq!(result["events"][1], json!({"Token": "answer"}));
-    assert_eq!(result["events"][2]["Done"]["output_tokens"], 2);
-}
-
-#[test]
-fn spawn_failure_emits_a_terminal_error() {
-    assert_failure(&run_fixture(None, false), "Codex");
-}
-
-#[test]
-fn closed_consumer_stops_an_idle_provider() {
-    let result = run_fixture(
-        Some(
-            r#"
-printf '%s\n' '{"type":"agent_message","text":"started"}'
-exec /bin/sleep 30
-"#,
-        ),
-        true,
-    );
-    assert_eq!(result["ok"], true, "{result}");
-}
-
-#[test]
-fn prompt_is_a_literal_argument() {
-    let result = run_fixture(
-        Some(
-            r#"
-[ "$1" = exec ] && [ "$2" = --json ] && [ "$3" = -m ] && [ "$4" = fixture-model ] && [ "$5" = -- ] && [ "$6" = --prompt-is-data ] || exit 23
-printf '%s\n' '{"type":"turn.completed","usage":{"output_tokens":3}}'
-"#,
-        ),
-        false,
-    );
-    assert_eq!(result["ok"], true, "{result}");
-    assert_eq!(result["events"][0]["Done"]["output_tokens"], 3, "{result}");
-}
-
-#[test]
-fn malformed_json_cannot_be_hidden_by_a_later_completion() {
-    let result = run_fixture(
-        Some(
-            r#"
-printf '%s\n' 'private invalid payload' '{"type":"turn.completed","usage":{}}'
-"#,
-        ),
-        false,
-    );
-    assert_failure(&result, "invalid Codex JSONL");
-    assert!(!result.to_string().contains("private invalid payload"));
-}
-
-#[test]
-fn invalid_utf8_emits_a_terminal_error() {
-    let result = run_fixture(Some("printf '\\377\\n'"), false);
-    assert_failure(&result, "could not read Codex output");
-}
-
-#[test]
-fn provider_failure_overrides_an_earlier_completion() {
-    let result = run_fixture(
-        Some(
-            r#"
-printf '%s\n' '{"type":"turn.completed","usage":{}}' '{"type":"turn.failed","error":{"message":"late failure"}}'
-"#,
-        ),
-        false,
-    );
-    assert_failure(&result, "late failure");
-}
-
-#[test]
-fn completion_waits_for_provider_shutdown() {
-    let result = run_fixture(
-        Some(
-            r#"
-printf '%s\n' '{"type":"task_complete","usage":{}}'
-exec 1>&-
-/bin/sleep 0.1
-exit 8
-"#,
-        ),
-        false,
-    );
-    assert_failure(&result, "8");
-}
-
-#[test]
-fn consumer_can_cancel_while_waiting_for_exit() {
-    let result = run_fixture(
-        Some(
-            r#"
-printf '%s\n' '{"type":"agent_message","text":"started"}'
-exec 1>&-
-exec /bin/sleep 30
-"#,
-        ),
-        true,
-    );
-    assert_eq!(result["ok"], true, "{result}");
+    drop(rx);
+    tokio::time::timeout(Duration::from_secs(3), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    fixture.assert_reaped().await;
 }

@@ -6,10 +6,10 @@ cd "$(git rev-parse --show-toplevel)"
 allowed_path='apps/heiwa_shell/src/model_calls.rs'
 provider_adapter_prefix='crates/heiwa_provider/src/providers/'
 
-# ProviderAdapter::send has three arguments after method dispatch: model,
+# ProviderAdapter::send and send_with_tools share the model/history prefix. send has three arguments after method dispatch: model,
 # message history by reference, and stream sender. Match that shape regardless
 # of receiver/variable names and formatting. Also catch trait UFCS dispatch.
-adapter_send_pattern='(?s)\.\s*send\s*\(\s*&?\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\(\s*\))?)*\s*,\s*(?:&\s*[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\(\s*\))?)+)\s*,|(?:\b[A-Za-z_][A-Za-z0-9_]*::)*\bProviderAdapter\s*::\s*send\s*\('
+adapter_send_pattern='(?s)\.\s*(?:send|send_with_tools)\s*\(\s*&?\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\(\s*\))?)*\s*,\s*(?:&\s*[A-Za-z_][A-Za-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*(?:\s*\(\s*\))?)+)\s*,|(?:\b[A-Za-z_][A-Za-z0-9_]*::)*\bProviderAdapter\s*::\s*(?:send|send_with_tools)\s*\('
 # Production inference must not bypass ModelCallExecutor through a provider
 # endpoint or by spawning a provider-owned CLI in the shell/loop crates.
 direct_inference_pattern='(?s)/api/(?:generate|chat)|/v1/chat(?:/completions)?|\b(?:std::process::|tokio::process::)?Command\s*::\s*new\s*\(\s*"(?:ollama|claude|codex|gemini|grok)"|\breqwest\b.{0,1200}(?:/api/(?:generate|chat)|/v1/chat(?:/completions)?)|\bCommand\s*::\s*new\s*\(\s*"curl"\s*\).{0,1200}(?:/api/(?:generate|chat)|/v1/chat(?:/completions)?)'
@@ -25,7 +25,10 @@ matches_direct_inference() {
 is_allowed_path() {
   # This provider factory only delegates through the same admitted witness;
   # check_provider_admission.py enforces its construction and runtime callers.
-  [[ "$1" == "$allowed_path" || "$1" == 'crates/heiwa_provider/src/routing.rs' ]]
+  # The trait's default send_with_tools formats the compatibility prompt and
+  # delegates to send; it is transport delegation, with no auth or endpoint.
+  # Raw endpoint/CLI calls remain forbidden here by the separate pattern.
+  [[ "$1" == "$allowed_path" || "$1" == 'crates/heiwa_provider/src/routing.rs' || "$1" == 'crates/heiwa_provider/src/adapter.rs' ]]
 }
 
 is_provider_adapter_path() {
@@ -55,6 +58,7 @@ self_test() {
   )'
   expression_model_fixture='gateway.send(model.as_str(), &history, stream_tx)'
   expression_messages_fixture='gateway.send(model, messages.as_slice(), stream_tx)'
+  native_fixture='gateway.send_with_tools(model, &history, stream_tx, tools)'
   safe_fixture='event_tx.send(StreamEvent::Done(usage))'
   endpoint_fixture='client.post("http://localhost:11434/api/generate")'
   inventory_fixture='client.get("http://localhost:11434/api/tags")'
@@ -66,6 +70,7 @@ self_test() {
   matches_pattern "$ufcs_fixture" || return 1
   matches_pattern "$expression_model_fixture" || return 1
   matches_pattern "$expression_messages_fixture" || return 1
+  matches_pattern "$native_fixture" || return 1
   ! matches_pattern "$safe_fixture" || return 1
   matches_direct_inference "$endpoint_fixture" || return 1
   ! matches_direct_inference "$inventory_fixture" || return 1
@@ -79,6 +84,9 @@ self_test() {
   content_is_violation "$allowed_path" "$endpoint_fixture" || return 1
   ! content_is_violation 'crates/heiwa_provider/src/providers/ollama.rs' "$cli_fixture" || return 1
   content_is_violation 'apps/heiwa_shell/src/other.rs' "$allowed_fixture" || return 1
+  content_is_violation 'apps/heiwa_shell/src/other.rs' "$native_fixture" || return 1
+  ! content_is_violation 'crates/heiwa_provider/src/adapter.rs' "$native_fixture" || return 1
+  content_is_violation 'crates/heiwa_provider/src/adapter.rs' "$endpoint_fixture" || return 1
 }
 
 if ! self_test; then

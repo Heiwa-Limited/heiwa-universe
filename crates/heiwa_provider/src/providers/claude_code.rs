@@ -55,6 +55,7 @@ impl ProviderAdapter for ClaudeCodeCliAdapter {
         }
 
         let mut child = cmd.spawn()?;
+        let _group = crate::adapter::CliProcessGroup::new(&child);
         let stdout = child.stdout.take().unwrap();
         let mut reader = BufReader::new(stdout).lines();
 
@@ -100,6 +101,20 @@ impl ProviderAdapter for ClaudeCodeCliAdapter {
             .send(StreamEvent::Done(TokenUsage::default()))
             .await;
         Ok(())
+    }
+
+    async fn send_with_tools(
+        &self,
+        model: &str,
+        messages: &[Message],
+        tx: mpsc::Sender<StreamEvent>,
+        tools: crate::adapter::ProviderTools,
+    ) -> Result<()> {
+        if !tools.definitions.is_empty() {
+            tx.send(StreamEvent::Error("Claude Code does not yet support Heiwa-governed host tools through its CLI. Use the provider API connection for this turn.".into())).await.ok();
+            return Ok(());
+        }
+        self.send(model, messages, tx).await
     }
 
     async fn interrupt(&self) -> Result<()> {

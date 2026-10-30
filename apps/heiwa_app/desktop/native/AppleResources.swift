@@ -1,6 +1,7 @@
 import Foundation
 import CoreFoundation
 import EventKit
+import AppKit
 
 // Protocol data only. Rust owns enrollment, selection, persistence, and effects.
 @main
@@ -17,14 +18,23 @@ struct AppleResources {
             let data = try readRequest()
             guard let request = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let operation = request["operation"] as? String,
-                  ["list", "scan", "plan_scan", "plan_apply", "reminders_list", "reminders_scan"].contains(operation) else { throw ReadError.invalidRequest }
+                  ["files_select", "list", "scan", "plan_scan", "plan_apply", "reminders_list", "reminders_scan", "reminders_create", "reminders_complete"].contains(operation) else { throw ReadError.invalidRequest }
             try validateSchemaVersion(request)
+            if operation == "files_select" { output(selectDirectory()); return }
             let calendarScan = operation == "scan" ? try calendarSelection(request) : nil
             let requestAccess = ["list", "reminders_list"].contains(operation) ? try resourceAccessRequested(request) : false
             if operation == "reminders_scan" {
                 _ = try reminderSelection(request)
             }
+            if ["reminders_create", "reminders_complete"].contains(operation) {
+                try validateReminderWrite(request, operation: operation)
+            }
             let store = EKEventStore()
+            if ["reminders_create", "reminders_complete"].contains(operation) {
+                readFailure = "reminders_write_uncertain"
+                output(try await remindersWrite(store: store, request: request, operation: operation))
+                return
+            }
             if operation == "reminders_list" || operation == "reminders_scan" {
                 readFailure = ReadError.remindersReadFailed.rawValue
                 output(try await remindersRead(store: store, request: request, operation: operation))
@@ -81,6 +91,19 @@ struct AppleResources {
             output(["schema_version": 1, "error": (error as? ReadError)?.rawValue ?? readFailure])
             exit(1)
         }
+    }
+
+    @MainActor static func selectDirectory() -> [String: Any] {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        let panel = NSOpenPanel()
+        panel.title = "Choose a workspace for Heiwa"
+        panel.message = "Heiwa can read and create files in this folder. Process actions still require approval."
+        panel.canChooseDirectories = true; panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false; panel.canCreateDirectories = false
+        app.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return ["schema_version":1,"cancelled":true] }
+        return ["schema_version":1,"path":url.standardizedFileURL.resolvingSymlinksInPath().path,"cancelled":false]
     }
 
     static func readRequest(
@@ -179,6 +202,63 @@ struct AppleResources {
         guard end > start, end.timeIntervalSince(start) <= 366 * 86400 else { throw ReadError.invalidRequest }
         return CalendarScanRequest(ids: ids, startText: startText, endText: endText, start: start, end: end,
                                    limit: try boundedInteger(request["limit"], in: 1...500))
+    }
+
+    // MARK: Owner-approved, selected-list reminder effects
+
+    static func reminderTimestamp(_ text: String) -> Date? {
+        let iso = ISO8601DateFormatter()
+        if let date = iso.date(from: text) { return date }
+        iso.formatOptions.insert(.withFractionalSeconds)
+        return iso.date(from: text)
+    }
+
+    static func validateReminderWrite(_ request: [String: Any], operation: String) throws {
+        guard let listID = request["list_id"] as? String, resourceIdentifierValid(listID) else { throw ReadError.invalidRequest }
+        if operation == "reminders_create" {
+            guard let title = request["title"] as? String, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  title.utf8.count <= 800 else { throw ReadError.invalidRequest }
+            if request["due"] != nil {
+                guard let due = request["due"] as? String, reminderTimestamp(due) != nil else { throw ReadError.invalidRequest }
+            }
+        } else {
+            guard let id = request["id"] as? String, resourceIdentifierValid(id),
+                  request["expected_title"] is String,
+                  let completed = request["completed"] as? NSNumber, CFGetTypeID(completed) == CFBooleanGetTypeID() else { throw ReadError.invalidRequest }
+        }
+    }
+
+    static func remindersWrite(store: EKEventStore, request: [String: Any], operation: String) async throws -> [String: Any] {
+        guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else { throw ReadError.remindersPermission }
+        let listID = request["list_id"] as! String
+        guard let list = store.calendars(for: .reminder).first(where: { $0.calendarIdentifier == listID }), list.allowsContentModifications else { throw ReadError.missingReminderList }
+        let reminder: EKReminder
+        if operation == "reminders_create" {
+            reminder = EKReminder(eventStore: store)
+            reminder.calendar = list
+            reminder.title = (request["title"] as! String)
+            if let due = request["due"] as? String, let date = reminderTimestamp(due) {
+                var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+                var components = calendar.dateComponents([.year,.month,.day,.hour,.minute,.second], from: date)
+                components.calendar = calendar; components.timeZone = calendar.timeZone
+                reminder.dueDateComponents = components
+            }
+        } else {
+            guard let existing = store.calendarItem(withIdentifier: request["id"] as! String) as? EKReminder,
+                  existing.calendar.calendarIdentifier == listID, existing.title == request["expected_title"] as? String else { throw ReadError.staleEvent }
+            reminder = existing
+            reminder.isCompleted = request["completed"] as! Bool
+        }
+        try store.save(reminder, commit: true)
+        let id = reminder.calendarItemIdentifier
+        // Verify through a fresh store rather than the just-mutated object.
+        let verifier = EKEventStore()
+        guard let saved = verifier.calendarItem(withIdentifier: id) as? EKReminder,
+              saved.calendar.calendarIdentifier == listID, saved.title == reminder.title,
+              saved.isCompleted == reminder.isCompleted,
+              saved.dueDateComponents?.date == reminder.dueDateComponents?.date else { throw ReadError.writeFailed }
+        return ["schema_version":1,"id":id,"list_id":listID,"title":saved.title ?? "", "completed":saved.isCompleted,
+                "due":try reminderDue(saved.dueDateComponents),"verified":true]
     }
 
     // MARK: Reminders read-only projection

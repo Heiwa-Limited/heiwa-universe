@@ -931,3 +931,13 @@ describe("OperatorClient", () => {
   });
 
 });
+
+it("persists an explicit inference choice in the submitted turn", async () => {
+  const store = new OperatorStore();
+  const deps = dependencies();
+  const client = new OperatorClient(store, deps);
+  await client.start("default");
+  await client.submitTurn("use the local model", { mode: "local_only" });
+  expect(deps.post).toHaveBeenCalledWith("/api/v1/operator/threads/default/turns", expect.objectContaining({ route_policy: { mode: "local_only" } }));
+  client.dispose();
+});

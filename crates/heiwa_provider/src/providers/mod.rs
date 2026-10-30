@@ -1,5 +1,6 @@
 pub mod anthropic_api;
 pub mod claude_code;
+pub(crate) mod codex_app_server;
 pub mod codex_cli;
 pub mod gemini_api;
 pub mod gemini_cli;

@@ -109,3 +109,44 @@ async fn local_repo_tools_fail_closed_without_lease_or_scope() {
     fs::remove_dir_all(root).ok();
     fs::remove_dir_all(outside_root).ok();
 }
+
+#[tokio::test]
+async fn reads_bound_bytes_before_allocation_and_do_not_split_utf8() {
+    let root = test_root("utf8-bound");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("unicode.txt"), "épreuve").unwrap();
+    let registry = local_repo_registry(leased_scope(root.clone()));
+    let result = registry
+        .call("fs.read", json!({"path":"unicode.txt","max_bytes":1}))
+        .await
+        .unwrap();
+    assert_eq!(result["content"], "");
+    assert_eq!(result["truncated"], true);
+    assert!(registry
+        .call(
+            "fs.read",
+            json!({"path":"unicode.txt","max_bytes":999999999})
+        )
+        .await
+        .is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+#[cfg(unix)]
+#[tokio::test]
+async fn search_does_not_recurse_through_a_symlink_cycle_or_read_an_unbounded_file() {
+    let root = test_root("grep-bound");
+    fs::create_dir_all(&root).unwrap();
+    std::os::unix::fs::symlink(&root, root.join("cycle")).unwrap();
+    let file = fs::File::create(root.join("large.txt")).unwrap();
+    file.set_len(2 * 1024 * 1024 * 1024).unwrap();
+    let registry = local_repo_registry(leased_scope(root.clone()));
+    let started = std::time::Instant::now();
+    let result = registry
+        .call("repo.grep", json!({"pattern":"not present"}))
+        .await
+        .unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(6));
+    assert_eq!(result["matches"], json!([]));
+    assert_eq!(result["truncated"], true);
+    fs::remove_dir_all(root).unwrap();
+}

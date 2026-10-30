@@ -9,6 +9,7 @@ import type { ProviderConnection } from "../state/types";
 export type ProviderExecutions = { health: RuntimeHealth | null; now: Date };
 
 export type ProviderConnectionActions = {
+  onConnectCodex?: () => Promise<void>;
   onConnectApiProvider?: (provider: string, apiKey: string) => Promise<void>;
   onVerifyApiProvider?: (accountId: string) => Promise<void>;
   onDisconnectApiProvider?: (accountId: string) => Promise<void>;
@@ -65,6 +66,13 @@ export function ProviderConnections(props: ProviderConnectionActions & {
   return <section class="provider-connections" aria-label="AI connections" aria-busy={busy()}>
     <h2>Your AI connections</h2>
     <p class="quiet">Connect an API account here, or use an installed provider tool. API usage is billed separately from ChatGPT or Claude subscriptions.</p>
+    <Show when={props.onConnectCodex}>
+      <div class="connection-add">
+        <strong>ChatGPT subscription through Codex</strong>
+        <p class="quiet">Sign in to Codex CLI with ChatGPT, then verify it here. Verification runs one small inference with a Heiwa tool. Your plan’s limits apply.</p>
+        <button type="button" class="first-run-button secondary" disabled={busy()} onClick={() => void run(() => props.onConnectCodex!(), "Codex completed a real Heiwa tool call. Its verified model is ready for work.")}>Verify Codex subscription</button>
+      </div>
+    </Show>
     <Show when={props.connections.length} fallback={<p>No accounts registered in this workspace yet.</p>}>
       <ul class="connection-list">
         <For each={props.connections}>{(connection) => <li class="connection-row">

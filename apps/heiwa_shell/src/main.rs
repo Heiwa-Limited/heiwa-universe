@@ -677,6 +677,11 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
+                    "verify-codex" => {
+                        let model = args.get(3).map(String::as_str);
+                        let verified = heiwa_provider::connections::connect_codex(model).await?;
+                        println!("Verified Codex subscription and host tool execution: {verified}");
+                    }
                     "add-key" => {
                         if args.len() < 5 {
                             println!("Usage: heiwa auth add-key <provider> <api-key>");
@@ -3315,7 +3320,8 @@ fn default_model_call_runtime() -> Result<DefaultModelCallRuntime, String> {
                 .map_err(|error| error.to_string())?,
             ));
             let executor = Arc::new(ModelCallExecutor::new_registry(sessions.clone()));
-            let mut runner = OperatorTurnRunner::new(sessions.clone(), executor.clone());
+            let mut runner = OperatorTurnRunner::new(sessions.clone(), executor.clone())
+                .with_tool_executor(Arc::new(cmd::agent_tools::NativeToolExecutor));
             // Shadow System 1 judgment is off unless `[system1] shadow` asks
             // for it, and it never changes execution. A bad setting disables
             // it, loudly, rather than the runtime.
@@ -3404,6 +3410,7 @@ async fn execute_routed_model_call(
         max_attempts: 3,
         cancel,
         delta_tx,
+        tools: Default::default(),
     })
     .await
 }
@@ -3459,6 +3466,7 @@ async fn execute_compression_model_call(
         max_attempts: 3,
         cancel,
         delta_tx: None,
+        tools: Default::default(),
     })
     .await
 }
@@ -3627,6 +3635,7 @@ pub(crate) async fn execute_mail_draft_model_call(
         max_attempts: 3,
         cancel,
         delta_tx: None,
+        tools: Default::default(),
     })
     .await;
     finish_auxiliary_turn(&sessions, &context, result.is_ok(), "drafting")
@@ -4088,6 +4097,7 @@ fn aggregate_model_call_results(
         provider_model_id: final_result.provider_model_id.clone(),
         rate_group: final_result.rate_group.clone(),
         text: final_result.text.clone(),
+        native_tools: final_result.native_tools,
         usage,
         attempts: first.attempts.saturating_add(final_result.attempts),
         failed_models,
@@ -4368,8 +4378,19 @@ async fn prepare_operator_turn_work(
     let prompt = start_request.prompt.clone();
     let persisted = heiwa_session::load_transcript(&thread_id)
         .unwrap_or_else(|_| heiwa_session::PersistedTranscript::empty(&thread_id));
-    let transcript_blocks = persisted.blocks();
+    let canonical = default_model_call_runtime()?
+        .sessions
+        .conversation_blocks(&thread_id, &context.turn_id, TRANSCRIPT_CHAR_BUDGET)
+        .map_err(|error| error.to_string())?;
+    let transcript_blocks = if canonical.is_empty() {
+        persisted.blocks()
+    } else {
+        canonical
+    };
     let mut pins = SessionPins::new();
+    if let Some(scope) = &tool_scope {
+        pins.scope = scope.clone();
+    }
     pins.pinned_provider = start_request.route_policy.preferred_provider.clone();
     pins.pinned_model = start_request.route_policy.preferred_model.clone();
     pins.route_preference = match start_request.route_policy.mode {
@@ -4507,7 +4528,15 @@ pub(crate) async fn submit_operator_turn(
     heiwa_shell::operator::OperatorTurnHandle,
     heiwa_shell::operator::OperatorSubmissionError,
 > {
-    submit_operator_turn_with_route(thread_id, request).await
+    let scope = if request.work_id.is_none() {
+        Some(
+            cmd::agent_tools::owner_scope(thread_id)
+                .map_err(heiwa_shell::operator::OperatorSubmissionError::Runtime)?,
+        )
+    } else {
+        None
+    };
+    submit_operator_turn_with_scope(thread_id, request, scope).await
 }
 
 fn automation_terminal_outcome(
@@ -4648,8 +4677,7 @@ pub(crate) async fn execute_repl_turn_streaming(
 ) {
     let client_request_id = format!("repl-{}", uuid::Uuid::new_v4());
     let start_request = heiwa_session::operator::StartTurnRequest::auto(client_request_id, prompt);
-    let mut handle = match submit_operator_turn_with_route(DEFAULT_SESSION_ID, start_request).await
-    {
+    let mut handle = match submit_operator_turn(DEFAULT_SESSION_ID, start_request).await {
         Ok(handle) => handle,
         Err(error) => {
             let _ = events.send(ReplStreamEvent::Error(error.to_string())).await;
@@ -5509,6 +5537,7 @@ mod tests {
             provider_model_id: "secondary-provider-model".to_string(),
             rate_group: "secondary-rate".to_string(),
             text: "done".to_string(),
+            native_tools: false,
             usage: heiwa_provider::adapter::TokenUsage::default(),
             attempts: 2,
             failed_models: vec!["primary/primary-model".to_string()],
@@ -5548,6 +5577,7 @@ mod tests {
             provider_model_id: "secondary-provider-model".to_string(),
             rate_group: "secondary-rate".to_string(),
             text: "done".to_string(),
+            native_tools: false,
             usage: heiwa_provider::adapter::TokenUsage {
                 input_tokens: 5,
                 output_tokens: 2,

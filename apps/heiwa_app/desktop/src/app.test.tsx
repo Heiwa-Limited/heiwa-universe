@@ -198,7 +198,7 @@ const SURFACE_MARKERS: Record<string, string | RegExp> = {
   social: /Ingress arrives with the L3 connector plane/,
   workers: "Operator turns",
   browser: "Go",
-  files: "Workspace tree",
+  files: "Conversation workspace",
 };
 
 describe("shell", () => {

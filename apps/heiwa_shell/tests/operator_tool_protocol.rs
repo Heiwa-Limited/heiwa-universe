@@ -27,20 +27,12 @@ use tokio::sync::mpsc;
 /// Records every message list it is sent. The first stage answers with
 /// `first`; any later stage finishes.
 struct RecordingAdapter {
-    first: String,
+    responses: Vec<String>,
     seen: Mutex<Vec<Vec<Message>>>,
     calls: AtomicUsize,
 }
 
 impl RecordingAdapter {
-    fn answering(first: &str) -> Arc<Self> {
-        Arc::new(Self {
-            first: first.to_string(),
-            seen: Mutex::new(Vec::new()),
-            calls: AtomicUsize::new(0),
-        })
-    }
-
     fn stages(&self) -> Vec<Vec<Message>> {
         self.seen.lock().unwrap().clone()
     }
@@ -55,11 +47,13 @@ impl ProviderAdapter for RecordingAdapter {
         stream_tx: mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<()> {
         self.seen.lock().unwrap().push(messages.to_vec());
-        let text = if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            self.first.clone()
-        } else {
-            "final answer".to_string()
-        };
+        let stage = self.calls.fetch_add(1, Ordering::SeqCst);
+        let text = self
+            .responses
+            .get(stage)
+            .or_else(|| self.responses.last())
+            .unwrap()
+            .clone();
         stream_tx.send(StreamEvent::Token(text)).await?;
         stream_tx
             .send(StreamEvent::Done(TokenUsage::default()))
@@ -162,11 +156,19 @@ fn turn(messages: Vec<Message>, tool_scope: Option<ExecutionScope>) -> OperatorM
 /// Run one turn through the real runner and executor; return every message
 /// list the provider received, one per model stage.
 async fn delivered(first: &str, turn: OperatorModelTurn) -> Vec<Vec<Message>> {
+    delivered_sequence(vec![first.to_string(), "final answer".to_string()], turn).await
+}
+
+async fn delivered_sequence(responses: Vec<String>, turn: OperatorModelTurn) -> Vec<Vec<Message>> {
     let journal = tempfile::tempdir().unwrap();
     let sessions = Arc::new(OperatorSessionService::new(
         OperatorJournal::new(journal.path().to_path_buf()).unwrap(),
     ));
-    let adapter = RecordingAdapter::answering(first);
+    let adapter = Arc::new(RecordingAdapter {
+        responses,
+        seen: Mutex::new(Vec::new()),
+        calls: AtomicUsize::new(0),
+    });
     let provider: Arc<dyn ProviderAdapter> = adapter.clone();
     let executor = Arc::new(ModelCallExecutor::new(
         Arc::new(move |_: &str, _: &str| Some(provider.clone())),
@@ -340,4 +342,58 @@ async fn a_quoted_protocol_does_not_stand_in_for_the_system_instruction() {
         assert_eq!(taught, vec![1], "stage {stage}: {messages:#?}");
         assert!(matches!(messages[2].role, Role::User), "stage {stage}");
     }
+}
+
+#[tokio::test]
+async fn follows_tool_results_through_multiple_model_rounds() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(
+        workspace.path().join("answer.txt"),
+        "verified fixture content",
+    )
+    .unwrap();
+    let scope = scope_granting(
+        workspace.path(),
+        &[
+            ("fs.list", RiskClass::HostSafeReadonly, true),
+            ("fs.read", RiskClass::HostSafeReadonly, true),
+        ],
+    );
+    let read =
+        r#"{"tool_calls":[{"id":"read-2","name":"fs.read","arguments":{"path":"answer.txt"}}]}"#;
+    let stages = delivered_sequence(
+        vec![LIST_CALL.into(), read.into(), "finished".into()],
+        turn(vec![user("find and read the file")], Some(scope)),
+    )
+    .await;
+    assert_eq!(
+        stages.len(),
+        3,
+        "must continue beyond the old single tool round"
+    );
+    assert!(stages[1].last().unwrap().content.contains("answer.txt"));
+    assert!(stages[2]
+        .last()
+        .unwrap()
+        .content
+        .contains("verified fixture content"));
+}
+
+#[tokio::test]
+async fn repeated_tool_plans_stop_at_the_round_limit() {
+    let workspace = tempfile::tempdir().unwrap();
+    let scope = scope_granting(
+        workspace.path(),
+        &[("fs.list", RiskClass::HostSafeReadonly, true)],
+    );
+    let stages = delivered_sequence(
+        vec![LIST_CALL.into()],
+        turn(vec![user("list")], Some(scope)),
+    )
+    .await;
+    assert_eq!(
+        stages.len(),
+        12,
+        "an unfinished model must not run indefinitely"
+    );
 }

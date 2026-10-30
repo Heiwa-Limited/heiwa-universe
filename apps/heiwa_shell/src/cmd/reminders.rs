@@ -1,5 +1,6 @@
 //! Explicitly selected Reminders reads and local Calendar-to-reminder proposals.
-//! No reminder effect, approval, or external write is admitted by this module.
+//! R1 commands remain read/propose-only. Owner tools add approved, selected-list
+//! creation/completion; no Work-worker write grant is inferred.
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
@@ -557,4 +558,59 @@ fn propose(args: &[String]) -> Result<Value> {
         "scope":{"selected_list_ids":ids,"target_list_id":target_id,"identity":"device/store-local imported event and occurrence"},
         "effects":"proposal only; no reminder written"}),
     )
+}
+
+/// Called only by the owner tool executor after its durable approval gate.
+/// Existing R1 read/propose commands and Work-worker grants remain unchanged.
+pub(crate) fn owner_write(operation: &str, args: &Value) -> Result<Value> {
+    if !["reminders_create", "reminders_complete"].contains(&operation) {
+        bail!("unsupported reminder effect");
+    }
+    apple_resources::require_connection(RESOURCE)?;
+    let _lock = selection_lock()?;
+    let ids = selected_ids()?;
+    let list = args["list_id"].as_str().context("list_id is required")?;
+    if !ids.iter().any(|id| id == list) {
+        bail!("reminder write target must be a selected list");
+    }
+    let inventory = inventory(false)?;
+    require_lists(&inventory, &ids)?;
+    if !inventory
+        .lists
+        .iter()
+        .any(|item| item.id == list && item.writable)
+    {
+        bail!("selected reminder list is not writable");
+    }
+    if operation == "reminders_create" {
+        let title = args["title"].as_str().context("reminder title required")?;
+        if title.trim().is_empty() || title.len() > 800 {
+            bail!("reminder title must contain 1..800 UTF-8 bytes");
+        }
+        if let Some(due) = args.get("due") {
+            DateTime::parse_from_rfc3339(
+                due.as_str().context("due must be an RFC3339 timestamp")?,
+            )?;
+        }
+    } else {
+        if !valid_id(args["id"].as_str().context("reminder id required")?)
+            || !args["completed"].is_boolean()
+            || !args["expected_title"].is_string()
+        {
+            bail!("invalid reminder completion target");
+        }
+    }
+    let mut payload = args.clone();
+    payload["operation"] = json!(operation);
+    payload["schema_version"] = json!(1);
+    let result = request(payload).context(
+        "Reminder write outcome may be uncertain; read the selected list before retrying",
+    )?;
+    if result["verified"] != true
+        || result["list_id"] != list
+        || !valid_id(result["id"].as_str().unwrap_or(""))
+    {
+        bail!("reminder write could not be verified; read the selected list before retrying");
+    }
+    Ok(result)
 }

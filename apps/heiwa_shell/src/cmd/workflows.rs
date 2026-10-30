@@ -52,7 +52,7 @@ fn rows(value: &Value, keys: &[&str], limit: usize) -> Value {
         "string_limit_chars":240})
 }
 
-fn daily_brief(limit: usize) -> Result<Value> {
+pub(crate) fn daily_brief(limit: usize) -> Result<Value> {
     let today = chrono::Local::now().date_naive().to_string();
     let calendar = super::calendar::events_range_payload(Some(&today), Some(&today))?;
     let mail = super::mail::summary_payload();
@@ -78,7 +78,7 @@ fn daily_brief(limit: usize) -> Result<Value> {
     }))
 }
 
-fn native_audit() -> Value {
+pub(crate) fn native_audit() -> Value {
     let connection = |status: Value| {
         rows(
             &json!([status]),
@@ -92,14 +92,14 @@ fn native_audit() -> Value {
          "implemented":"selected calendar reads and approval-staged event creation",
          "verify":"heiwa calendar sync --source apple --json"},
         {"app":"Reminders", "connection":connection(super::reminders::status()),
-         "implemented":"selected list reads and local event-to-reminder proposals; no reminder writes",
+         "implemented":"selected-list reads, local event-to-reminder proposals, and owner-approved creation/completion through heiwa tools",
          "verify":"heiwa reminders read --json"},
         {"app":"Mail", "implemented":"inbox metadata snapshot; no body reads or sending",
          "permission":"not probed", "verify":"Read Apple Mail in Heiwa.app"},
-        {"app":"Notes", "implemented":false, "gap":"scoped note selection, import, source links, and governed edits"},
-        {"app":"Finder", "implemented":false, "gap":"native file selection, reveal, and security-scoped access"},
-        {"app":"Terminal", "implemented":"CLI and governed process execution",
-         "gap":"native Terminal.app directory/session handoff"},
+        {"app":"Notes", "implemented":"title search, exact-ID reads, folder inventory, and approved new notes through heiwa tools", "gap":"existing-note edits, attachments, and live change notifications"},
+        {"app":"Finder", "implemented":"native workspace folder selection, scoped file reads, new artifacts, and approved Finder reveal", "gap":"file moves, revisions, and sandboxed-app bookmark lifecycle"},
+        {"app":"Terminal", "implemented":"CLI, approved workspace process execution in the macOS sandbox, and Terminal.app directory handoff",
+         "gap":"interactive Terminal session observation and job reattachment"},
         {"app":"Shortcuts", "implemented":false, "gap":"typed inputs, declared effects, approvals, and run receipts"}
     ], "permission_policy":"enrollment does not prove current TCC permission; this workflow never requests access"})
 }

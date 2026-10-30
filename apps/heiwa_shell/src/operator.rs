@@ -159,6 +159,10 @@ pub trait OperatorApprovalService: Send + Sync {
 
 #[async_trait]
 pub trait OperatorToolExecutor: Send + Sync {
+    fn catalog(&self, scope: &ExecutionScope) -> Vec<heiwa_provider::adapter::ToolDefinition> {
+        crate::agentic::registry_catalog(&heiwa_mcp::local_repo_registry(scope.clone()), scope)
+    }
+
     async fn execute(
         &self,
         scope: ExecutionScope,
@@ -220,7 +224,9 @@ struct DrexApprovalService;
 
 impl OperatorApprovalService for DrexApprovalService {
     fn plan(&self, call: &heiwa_protocol::ToolCall) -> crate::agentic::ToolApproval {
-        crate::agentic::plan_tool_approval(call)
+        // A model turn is never a human-entered CLI command. The default CLI
+        // policy auto-approves host mutations; that must not leak into chat.
+        crate::agentic::plan_tool_approval_for_surface(call, "operator")
     }
 
     fn stage(
@@ -443,6 +449,60 @@ fn with_tool_protocol(mut messages: Vec<Message>, scope: Option<&ExecutionScope>
         },
     );
     messages
+}
+
+/// Product result facts come from host receipts, never the model's prose.
+fn verified_tool_result(
+    name: &str,
+    receipt: &heiwa_protocol::ToolCallReceipt,
+) -> serde_json::Value {
+    if receipt.status != heiwa_protocol::ToolCallStatus::Success {
+        return serde_json::Value::Null;
+    }
+    let Some(value) = &receipt.result else {
+        return serde_json::Value::Null;
+    };
+    let kind = match name {
+        "artifact.write" if value["verified"] == true => "file",
+        "notes.create" if value["verified"] == true => "note",
+        "reminders.create" | "reminders.complete" if value["verified"] == true => "reminder",
+        "process.run" if value["success"] == true && value["exit_code"] == 0 => "process",
+        "calendar.stage" => "calendar_proposal",
+        _ => return serde_json::Value::Null,
+    };
+    let mut result = serde_json::Map::new();
+    result.insert("kind".into(), json!(kind));
+    for key in [
+        "path",
+        "bytes",
+        "sha256",
+        "id",
+        "list_id",
+        "title",
+        "completed",
+        "folder_id",
+        "exit_code",
+    ] {
+        if let Some(field) = value
+            .get(key)
+            .filter(|field| field.is_boolean() || field.is_number() || field.is_string())
+        {
+            let field = if let Some(text) = field.as_str() {
+                json!(text.chars().take(4096).collect::<String>())
+            } else {
+                field.clone()
+            };
+            result.insert(key.into(), field);
+        }
+    }
+    if kind == "calendar_proposal" {
+        result.insert(
+            "request_id".into(),
+            value["approval_request"]["request_id"].clone(),
+        );
+        result.insert("title".into(), value["hold"]["title"].clone());
+    }
+    serde_json::Value::Object(result)
 }
 
 fn validate_artifact_id(artifact_id: &str) -> Result<()> {
@@ -1266,273 +1326,326 @@ impl OperatorTurnRunner {
         cancel: watch::Receiver<bool>,
         direct_frames: &mpsc::Sender<OperatorStreamFrame>,
     ) -> Result<CompletedModelTurn> {
-        let request_template = model.request.clone();
-        let candidates = model.candidates.clone();
+        const MAX_MODEL_ROUNDS: usize = 12;
+        const MAX_TOOL_CALLS: usize = 48;
+        let mut request = model.request;
         let mut messages = with_tool_protocol(model.messages, model.tool_scope.as_ref());
-        let remaining_budget_usd = model.remaining_budget_usd;
-        let max_attempts = model.max_attempts;
-        let done_payload = model.done_payload;
-        let first = self
-            .execute_model_stage(
-                thread_id,
-                turn_id,
-                work_id,
-                cursor,
-                model.request,
-                model.candidates,
-                messages.clone(),
-                remaining_budget_usd,
-                max_attempts,
-                cancel.clone(),
-                direct_frames,
-            )
-            .await?;
-        let remaining_after_first = subtract_turn_budget(remaining_budget_usd, first.cost_usd)?;
-
-        let tool_calls = crate::agentic::parse_tool_calls(&first.text);
-        let Some(scope) = model.tool_scope else {
-            let receipt_ref = first.route_receipt_ref.clone();
-            return Ok(CompletedModelTurn {
-                result: first,
-                done_payload,
-                receipt_ref,
-            });
-        };
-        if tool_calls.is_empty() {
-            let receipt_ref = first.route_receipt_ref.clone();
-            return Ok(CompletedModelTurn {
-                result: first,
-                done_payload,
-                receipt_ref,
-            });
-        }
-
-        let mut tool_entries = Vec::new();
-        for call in tool_calls {
+        let definitions = model
+            .tool_scope
+            .as_ref()
+            .map(|scope| self.tools.catalog(scope))
+            .unwrap_or_default();
+        let mut remaining_budget = model.remaining_budget_usd;
+        let mut tool_count = 0usize;
+        let mut total_usage = heiwa_provider::adapter::TokenUsage::default();
+        let mut total_cost = 0.0;
+        let mut total_truth = None;
+        let mut attempt_records = Vec::new();
+        for round in 0..MAX_MODEL_ROUNDS {
             if *cancel.borrow() {
                 return Err(anyhow!("operator turn cancelled"));
             }
-            *cursor = self
-                .append_and_publish(
-                    runtime_event(
+            let mut result = self
+                .execute_model_stage(
+                    thread_id,
+                    turn_id,
+                    work_id,
+                    cursor,
+                    request.clone(),
+                    model.candidates.clone(),
+                    messages.clone(),
+                    remaining_budget,
+                    model.max_attempts,
+                    cancel.clone(),
+                    direct_frames,
+                    model.tool_scope.as_ref(),
+                    &definitions,
+                    &mut tool_count,
+                )
+                .await?;
+            remaining_budget = subtract_turn_budget(remaining_budget, result.cost_usd)?;
+            crate::model_calls::add_cumulative_cost(
+                &mut total_cost,
+                &mut total_truth,
+                Some(result.cost_usd),
+                &result.cost_truth,
+            );
+            total_usage.input_tokens = total_usage
+                .input_tokens
+                .saturating_add(result.usage.input_tokens);
+            total_usage.output_tokens = total_usage
+                .output_tokens
+                .saturating_add(result.usage.output_tokens);
+            total_usage.cache_read_tokens = total_usage
+                .cache_read_tokens
+                .saturating_add(result.usage.cache_read_tokens);
+            total_usage.cache_write_tokens = total_usage
+                .cache_write_tokens
+                .saturating_add(result.usage.cache_write_tokens);
+            attempt_records.extend(result.attempt_records.clone());
+            let calls = if result.native_tools {
+                Vec::new()
+            } else {
+                crate::agentic::parse_tool_calls(&result.text)
+            };
+            if calls.is_empty() || model.tool_scope.is_none() {
+                result.cost_usd = total_cost;
+                result.cost_truth =
+                    total_truth.unwrap_or(heiwa_core::drex::CostTruth::CannotConfirm);
+                total_usage.cost_usd = total_cost;
+                result.usage = total_usage;
+                result.attempts = attempt_records.len();
+                result.attempt_records = attempt_records;
+                let receipt_ref = result.route_receipt_ref.clone();
+                return Ok(CompletedModelTurn {
+                    result,
+                    done_payload: model.done_payload,
+                    receipt_ref,
+                });
+            }
+            // Never label an unfinished tool plan as a completed assistant answer.
+            if round + 1 == MAX_MODEL_ROUNDS || tool_count + calls.len() > MAX_TOOL_CALLS {
+                return Err(anyhow!("agent execution limit reached before completion ({MAX_MODEL_ROUNDS} model rounds, {MAX_TOOL_CALLS} tool calls)"));
+            }
+            let scope = model.tool_scope.as_ref().expect("scope checked above");
+            let mut entries = Vec::new();
+            for call in calls {
+                tool_count += 1;
+                entries.push(
+                    self.execute_tool_call(
                         thread_id,
                         turn_id,
-                        Some(&call.id),
                         work_id,
-                        OperatorEventType::ToolCallStarted,
-                        json!({"name": call.name, "arguments": call.arguments}),
-                    ),
-                    Some(direct_frames),
-                )
-                .await?
-                .cursor;
-            // DREX owns the approval policy and packet format. We own the
-            // ordered durable audit trail around it, so an append failure
-            // prevents staging, waiting, and the side effect.
-            let approval = self.approvals.plan(&call);
-            let request_id = approval.request_id.clone();
-            *cursor = self.append_and_publish(runtime_event(
-                thread_id,
-                turn_id,
-                Some(&call.id),
-                work_id,
-                OperatorEventType::ApprovalRequested,
-                json!({
-                    "request_id": request_id,
-                    "tool": call.name,
-                    "call_id": call.id,
-                    "risk": approval.risk.as_str(),
-                    "surface": approval.surface,
-                    "outcome": if approval.request_id.is_some() { "pending" } else { "auto_approved" },
-                }),
-            ), Some(direct_frames)).await?.cursor;
-            let outcome = if approval.request_id.is_some() {
-                self.approvals.stage(&call, &approval)?;
-                let wait_approval = approval.clone();
-                let approvals = self.approvals.clone();
-                let approval_wait_cancelled = Arc::new(AtomicBool::new(false));
-                let waiter_cancelled = approval_wait_cancelled.clone();
-                let mut wait = tokio::task::spawn_blocking(move || {
-                    approvals.wait(&wait_approval, &waiter_cancelled)
-                });
-                let mut approval_cancel = cancel.clone();
-                tokio::select! {
-                    waited = &mut wait => match waited {
-                        Ok(Ok(outcome)) => outcome,
-                        Ok(Err(error)) => format!("timeout: {error}"),
-                        Err(error) => return Err(anyhow!("approval waiter failed: {error}")),
-                    },
-                    changed = approval_cancel.changed() => {
-                        match changed {
-                            Ok(()) if *approval_cancel.borrow() => {
-                                approval_wait_cancelled.store(true, Ordering::Release);
-                                match wait.await {
-                                    Ok(Ok(_)) | Ok(Err(_)) => {}
-                                    Err(error) => return Err(anyhow!("approval waiter failed: {error}")),
-                                }
-                                *cursor = self.append_and_publish(runtime_event(
-                                    thread_id,
-                                    turn_id,
-                                    Some(&call.id),
-                                    work_id,
-                                    OperatorEventType::ApprovalDecided,
-                                    json!({
-                                        "request_id": approval.request_id,
-                                        "tool": call.name,
-                                        "call_id": call.id,
-                                        "risk": approval.risk.as_str(),
-                                        "surface": approval.surface,
-                                        "outcome": "cancelled",
-                                        "reason": "OPERATOR_CANCELLED",
-                                    }),
-                                ), Some(direct_frames)).await?.cursor;
-                                return Err(anyhow!("operator turn cancelled"));
-                            }
-                            _ => return Err(anyhow!("operator cancellation channel closed")),
-                        }
-                    }
-                }
-            } else {
-                "auto_approved".to_string()
-            };
-            *cursor = self.append_and_publish(runtime_event(
-                thread_id,
-                turn_id,
-                Some(&call.id),
-                work_id,
-                OperatorEventType::ApprovalDecided,
-                json!({
-                    "request_id": approval.request_id,
-                    "tool": call.name,
-                    "call_id": call.id,
-                    "risk": approval.risk.as_str(),
-                    "surface": approval.surface,
-                    "outcome": outcome,
-                    "reason": if outcome == "approved" || outcome == "auto_approved" { serde_json::Value::Null } else { json!("policy_denied_or_timeout") },
-                }),
-            ), Some(direct_frames)).await?.cursor;
-            if outcome != "approved" && outcome != "auto_approved" {
-                return Err(anyhow!("tool approval did not permit execution: {outcome}"));
+                        cursor,
+                        scope,
+                        &call,
+                        &result.provider,
+                        &result.model_id,
+                        cancel.clone(),
+                        direct_frames,
+                    )
+                    .await?,
+                );
             }
-            if *cancel.borrow() {
-                return Err(anyhow!("operator turn cancelled"));
-            }
-            let mut tool_cancel = cancel.clone();
-            let tool_execution = self.tools.execute(
-                scope.clone(),
-                call.clone(),
-                &first.provider,
-                &first.model_id,
-            );
-            tokio::pin!(tool_execution);
-            let (receipt, entry) = tokio::select! {
-                biased;
-                result = &mut tool_execution => result?,
-                changed = tool_cancel.changed() => {
+            messages.push(Message {
+                role: Role::Assistant,
+                content: result.text,
+            });
+            let tool_result = crate::agentic::tool_result_prompt(&entries);
+            messages.push(Message {
+                role: Role::User,
+                content: tool_result.clone(),
+            });
+            request.call_id = format!("call-{}", Uuid::new_v4());
+            request.raw_text = tool_result;
+        }
+        unreachable!("bounded loop returns on its final iteration")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_tool_call(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+        work_id: Option<&str>,
+        cursor: &mut String,
+        scope: &ExecutionScope,
+        call: &heiwa_protocol::ToolCall,
+        provider: &str,
+        model_id: &str,
+        cancel: watch::Receiver<bool>,
+        direct_frames: &mpsc::Sender<OperatorStreamFrame>,
+    ) -> Result<crate::agentic::ToolTranscriptEntry> {
+        if *cancel.borrow() {
+            return Err(anyhow!("operator turn cancelled"));
+        }
+        *cursor = self
+            .append_and_publish(
+                runtime_event(
+                    thread_id,
+                    turn_id,
+                    Some(&call.id),
+                    work_id,
+                    OperatorEventType::ToolCallStarted,
+                    json!({"name": call.name, "arguments": call.arguments}),
+                ),
+                Some(direct_frames),
+            )
+            .await?
+            .cursor;
+        // DREX owns the approval policy and packet format. We own the
+        // ordered durable audit trail around it, so an append failure
+        // prevents staging, waiting, and the side effect.
+        let approval = self.approvals.plan(&call);
+        let request_id = approval.request_id.clone();
+        *cursor = self.append_and_publish(runtime_event(
+        thread_id,
+        turn_id,
+        Some(&call.id),
+        work_id,
+        OperatorEventType::ApprovalRequested,
+        json!({
+            "request_id": request_id,
+            "tool": call.name,
+            "call_id": call.id,
+            "risk": approval.risk.as_str(),
+            "surface": approval.surface,
+            "outcome": if approval.request_id.is_some() { "pending" } else { "auto_approved" },
+        }),
+    ), Some(direct_frames)).await?.cursor;
+        let outcome = if approval.request_id.is_some() {
+            self.approvals.stage(&call, &approval)?;
+            let wait_approval = approval.clone();
+            let approvals = self.approvals.clone();
+            let approval_wait_cancelled = Arc::new(AtomicBool::new(false));
+            let waiter_cancelled = approval_wait_cancelled.clone();
+            let mut wait = tokio::task::spawn_blocking(move || {
+                approvals.wait(&wait_approval, &waiter_cancelled)
+            });
+            let mut approval_cancel = cancel.clone();
+            tokio::select! {
+                waited = &mut wait => match waited {
+                    Ok(Ok(outcome)) => outcome,
+                    Ok(Err(error)) => format!("timeout: {error}"),
+                    Err(error) => return Err(anyhow!("approval waiter failed: {error}")),
+                },
+                changed = approval_cancel.changed() => {
                     match changed {
-                        Ok(()) if *tool_cancel.borrow() => {
-                            self.append_uncertain_tool_completion(
-                                cursor,
+                        Ok(()) if *approval_cancel.borrow() => {
+                            approval_wait_cancelled.store(true, Ordering::Release);
+                            match wait.await {
+                                Ok(Ok(_)) | Ok(Err(_)) => {}
+                                Err(error) => return Err(anyhow!("approval waiter failed: {error}")),
+                            }
+                            *cursor = self.append_and_publish(runtime_event(
                                 thread_id,
                                 turn_id,
+                                Some(&call.id),
                                 work_id,
-                                &call.id,
-                                &call.name,
-                                direct_frames,
-                            ).await?;
+                                OperatorEventType::ApprovalDecided,
+                                json!({
+                                    "request_id": approval.request_id,
+                                    "tool": call.name,
+                                    "call_id": call.id,
+                                    "risk": approval.risk.as_str(),
+                                    "surface": approval.surface,
+                                    "outcome": "cancelled",
+                                    "reason": "OPERATOR_CANCELLED",
+                                }),
+                            ), Some(direct_frames)).await?.cursor;
                             return Err(anyhow!("operator turn cancelled"));
                         }
                         _ => return Err(anyhow!("operator cancellation channel closed")),
                     }
                 }
-            };
-            if *cancel.borrow() {
-                self.append_uncertain_tool_completion(
+            }
+        } else {
+            "auto_approved".to_string()
+        };
+        *cursor = self.append_and_publish(runtime_event(
+        thread_id,
+        turn_id,
+        Some(&call.id),
+        work_id,
+        OperatorEventType::ApprovalDecided,
+        json!({
+            "request_id": approval.request_id,
+            "tool": call.name,
+            "call_id": call.id,
+            "risk": approval.risk.as_str(),
+            "surface": approval.surface,
+            "outcome": outcome,
+            "reason": if outcome == "approved" || outcome == "auto_approved" { serde_json::Value::Null } else { json!("policy_denied_or_timeout") },
+        }),
+    ), Some(direct_frames)).await?.cursor;
+        if outcome != "approved" && outcome != "auto_approved" {
+            return Err(anyhow!("tool approval did not permit execution: {outcome}"));
+        }
+        if *cancel.borrow() {
+            return Err(anyhow!("operator turn cancelled"));
+        }
+        let mut tool_cancel = cancel.clone();
+        let tool_execution = self
+            .tools
+            .execute(scope.clone(), call.clone(), provider, model_id);
+        tokio::pin!(tool_execution);
+        let (receipt, mut entry) = tokio::select! {
+            biased;
+            result = &mut tool_execution => result?,
+            changed = tool_cancel.changed() => {
+                match changed {
+                    Ok(()) if *tool_cancel.borrow() => {
+                        self.append_uncertain_tool_completion(
+                            cursor,
+                            thread_id,
+                            turn_id,
+                            work_id,
+                            &call.id,
+                            &call.name,
+                            direct_frames,
+                        ).await?;
+                        return Err(anyhow!("operator turn cancelled"));
+                    }
+                    _ => return Err(anyhow!("operator cancellation channel closed")),
+                }
+            }
+        };
+        if *cancel.borrow() {
+            self.append_uncertain_tool_completion(
+                cursor,
+                thread_id,
+                turn_id,
+                work_id,
+                &call.id,
+                &call.name,
+                direct_frames,
+            )
+            .await?;
+            return Err(anyhow!("operator turn cancelled"));
+        }
+        let (preview, artifact_ref) = self
+            .persist_large_tool_output(
+                OperatorTurnStreamContext {
                     cursor,
                     thread_id,
                     turn_id,
                     work_id,
-                    &call.id,
-                    &call.name,
                     direct_frames,
-                )
-                .await?;
-                return Err(anyhow!("operator turn cancelled"));
-            }
-            let (preview, artifact_ref) = self
-                .persist_large_tool_output(
-                    OperatorTurnStreamContext {
-                        cursor,
-                        thread_id,
-                        turn_id,
-                        work_id,
-                        direct_frames,
-                    },
-                    &call.id,
-                    &call.name,
-                    &entry.output,
-                )
-                .await?;
-            *cursor = self
-                .append_and_publish(
-                    runtime_event(
-                        thread_id,
-                        turn_id,
-                        Some(&call.id),
-                        work_id,
-                        OperatorEventType::ToolCallCompleted,
-                        json!({
-                            "name": call.name,
-                            "status": receipt.status.as_str(),
-                            "output": preview.clone(),
-                            "output_preview": preview,
-                            "artifact_ref": artifact_ref,
-                            "receipt_id": receipt.id,
-                            "error": receipt.error,
-                        }),
-                    ),
-                    Some(direct_frames),
-                )
-                .await?
-                .cursor;
-            tool_entries.push(entry);
-        }
-
-        if *cancel.borrow() {
-            return Err(anyhow!("operator turn cancelled"));
-        }
-        messages.push(Message {
-            role: heiwa_provider::adapter::Role::Assistant,
-            content: first.text,
-        });
-        messages.push(Message {
-            role: heiwa_provider::adapter::Role::User,
-            content: crate::agentic::tool_result_prompt(&tool_entries),
-        });
-        let mut follow_up = request_template;
-        follow_up.call_id = format!("call-{}", Uuid::new_v4());
-        follow_up.raw_text = crate::agentic::tool_result_prompt(&tool_entries);
-        let result = self
-            .execute_model_stage(
-                thread_id,
-                turn_id,
-                work_id,
-                cursor,
-                follow_up,
-                candidates,
-                messages,
-                remaining_after_first,
-                max_attempts,
-                cancel,
-                direct_frames,
+                },
+                &call.id,
+                &call.name,
+                &entry.output,
             )
             .await?;
-        let receipt_ref = result.route_receipt_ref.clone();
-        Ok(CompletedModelTurn {
-            result,
-            done_payload,
-            receipt_ref,
-        })
+        if let Some(reference) = &artifact_ref {
+            entry.output =
+                json!({"output_preview":preview,"artifact_ref":reference,"truncated":true})
+                    .to_string();
+        }
+        *cursor = self
+            .append_and_publish(
+                runtime_event(
+                    thread_id,
+                    turn_id,
+                    Some(&call.id),
+                    work_id,
+                    OperatorEventType::ToolCallCompleted,
+                    json!({
+                        "name": call.name,
+                        "status": receipt.status.as_str(),
+                        "output": preview.clone(),
+                        "output_preview": preview,
+                        "artifact_ref": artifact_ref,
+                        "verified_result": verified_tool_result(&call.name, &receipt),
+                        "receipt_id": receipt.id,
+                        "error": receipt.error,
+                    }),
+                ),
+                Some(direct_frames),
+            )
+            .await?
+            .cursor;
+        Ok(entry)
     }
 
     async fn append_uncertain_tool_completion(
@@ -1586,8 +1699,14 @@ impl OperatorTurnRunner {
         max_attempts: usize,
         cancel: watch::Receiver<bool>,
         direct_frames: &mpsc::Sender<OperatorStreamFrame>,
+        tool_scope: Option<&ExecutionScope>,
+        definitions: &[heiwa_provider::adapter::ToolDefinition],
+        tool_count: &mut usize,
     ) -> Result<ModelCallResult> {
         let (delta_tx, mut delta_rx) = mpsc::channel(32);
+        let (request_tx, mut request_rx) =
+            mpsc::channel::<heiwa_provider::adapter::ProviderToolRequest>(8);
+        let execution_cancel = cancel.clone();
         let execution = ModelCallExecution {
             request,
             candidates,
@@ -1596,12 +1715,33 @@ impl OperatorTurnRunner {
             max_attempts,
             cancel,
             delta_tx: Some(delta_tx),
+            tools: heiwa_provider::adapter::ProviderTools {
+                definitions: definitions.to_vec(),
+                requests: Some(request_tx),
+                ..Default::default()
+            },
         };
         let future = self.executor.execute(execution);
         tokio::pin!(future);
         let result = loop {
             tokio::select! {
                 result = &mut future => break result.map_err(anyhow::Error::from)?,
+                Some(request) = request_rx.recv() => {
+                    self.publish_durable_after(thread_id, cursor, Some(direct_frames)).await?;
+                    let scope = tool_scope.ok_or_else(|| anyhow!("provider requested a tool without an execution scope"))?;
+                    *tool_count += 1;
+                    if *tool_count > 48 { return Err(anyhow!("agent tool-call limit reached")); }
+                    let call = heiwa_protocol::ToolCall {
+                        id: format!("tool-{}", Uuid::new_v4()), name: request.name,
+                        arguments: request.arguments,
+                    };
+                    let entry = self.execute_tool_call(
+                        thread_id, turn_id, _work_id, cursor, scope, &call,
+                        &request.provider, &request.model, execution_cancel.clone(), direct_frames,
+                    ).await?;
+                    let success = !entry.output.starts_with("error: ");
+                    let _ = request.response.send(heiwa_provider::adapter::ToolResponse { output: entry.output, success });
+                }
                 delta = delta_rx.recv() => {
                     let Some(delta) = delta else { continue; };
                     self.publish_durable_after(thread_id, cursor, Some(direct_frames)).await?;
@@ -2219,6 +2359,7 @@ mod tests {
                 provider_model_id: "fake-model".into(),
                 rate_group: "test".into(),
                 text: self.responses[index].clone(),
+                native_tools: false,
                 usage: TokenUsage::default(),
                 attempts: 1,
                 failed_models: vec![],
@@ -2252,6 +2393,7 @@ mod tests {
                 provider_model_id: "fake-model".into(),
                 rate_group: "test".into(),
                 text: self.answer.clone(),
+                native_tools: false,
                 usage: TokenUsage::default(),
                 attempts: 1,
                 failed_models: vec![],
@@ -2279,6 +2421,7 @@ mod tests {
                 model_id: "fake-model".into(),
                 provider_model_id: "fake-model".into(),
                 rate_group: "test".into(),
+                native_tools: false,
                 text: if index == 0 {
                     r#"{"tool_calls":[{"id":"tool-1","name":"fs.list","arguments":{"path":"."}}]}"#
                         .to_string()
@@ -2418,6 +2561,7 @@ mod tests {
                 provider_model_id: "fake-model".into(),
                 rate_group: "test".into(),
                 text: "model answer".into(),
+                native_tools: false,
                 usage: TokenUsage {
                     input_tokens: 2,
                     output_tokens: 2,

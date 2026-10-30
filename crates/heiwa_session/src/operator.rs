@@ -1028,6 +1028,54 @@ impl OperatorSessionService {
     /// an empty view rather than an error. `skipped_lines` on the view is
     /// stream-wide journal damage (see [`OperatorThreadView::skipped_lines`])
     /// and is reported even on the empty-thread branch.
+    /// The admitted journal projection is the conversation authority. Legacy
+    /// session files can lag API turns, so inference must read this projection.
+    pub fn conversation_blocks(
+        &self,
+        thread_id: &str,
+        before_turn: &str,
+        max_chars: usize,
+    ) -> Result<Vec<heiwa_protocol::TranscriptBlock>> {
+        let materialized = self.materialized()?;
+        let Some(thread) = materialized.threads.get(thread_id) else {
+            return Ok(Vec::new());
+        };
+        let prior: Vec<_> = thread
+            .turns
+            .iter()
+            .take_while(|turn| turn.turn_id != before_turn)
+            .collect();
+        let mut pairs = Vec::new();
+        let mut remaining = max_chars.min(128 * 1024);
+        for turn in prior.into_iter().rev().take(40) {
+            let Some(prompt) = &turn.prompt else {
+                continue;
+            };
+            let answer = turn.assistant_text.clone().unwrap_or_else(|| {
+                format!(
+                    "Previous turn status: {}. No completed assistant result was recorded.",
+                    turn.status
+                )
+            });
+            let needed = prompt.chars().count() + answer.chars().count();
+            if needed > remaining {
+                break;
+            }
+            remaining -= needed;
+            pairs.push((prompt.clone(), answer));
+        }
+        pairs.reverse();
+        Ok(pairs
+            .into_iter()
+            .flat_map(|(user, assistant)| {
+                [
+                    heiwa_protocol::TranscriptBlock::User(user),
+                    heiwa_protocol::TranscriptBlock::Assistant(assistant),
+                ]
+            })
+            .collect())
+    }
+
     pub fn thread(&self, thread_id: &str) -> Result<OperatorThreadView> {
         let materialized = self.materialized()?;
         let mut view = match materialized.threads.get(thread_id) {
@@ -1777,6 +1825,7 @@ struct FoldedTurn {
     status: String,
     cancel_requested: bool,
     prompt: Option<String>,
+    assistant_text: Option<String>,
     user_message_cursor: Option<String>,
     started_at: String,
     route_policy: Option<TurnRoutePolicy>,
@@ -2219,6 +2268,13 @@ fn apply_to_existing_thread(
         }
         OperatorEventType::TurnStarted => apply_turn_started(entry, event),
         OperatorEventType::UserMessage => apply_user_message(entry, event, row),
+        OperatorEventType::AssistantCompleted => {
+            if !apply_nonterminal_touch(entry,event) {return false;}
+            if let Some(turn)=entry.turns.iter_mut().find(|turn|Some(turn.turn_id.as_str())==event.turn_id.as_deref()) {
+                turn.assistant_text=event.payload["text"].as_str().map(String::from);
+            }
+            true
+        },
         OperatorEventType::TurnCompleted => apply_terminal(entry, event, "completed"),
         OperatorEventType::TurnInterrupted => apply_terminal(entry, event, "interrupted"),
         OperatorEventType::Blocker => apply_terminal(entry, event, "blocked"),
@@ -2232,7 +2288,6 @@ fn apply_to_existing_thread(
         | OperatorEventType::RouteCompleted
         | OperatorEventType::RouteFailed
         | OperatorEventType::AssistantStarted
-        | OperatorEventType::AssistantCompleted
         | OperatorEventType::ArtifactCreated
         | OperatorEventType::TestResult
         | OperatorEventType::ReceiptLinked
@@ -2297,6 +2352,7 @@ fn apply_turn_started(entry: &mut FoldedThread, event: &OperatorEvent) -> bool {
         status: "open".to_string(),
         cancel_requested: false,
         prompt: None,
+        assistant_text: None,
         user_message_cursor: None,
         started_at: event.occurred_at.clone(),
         route_policy,
@@ -2480,6 +2536,69 @@ mod tests {
         new_event, now_iso, open_ownership_file, OperatorSessionService, StartTurnRequest,
         OPERATOR_ACTIVITY_LEASE_FILE,
     };
+
+    #[test]
+    fn canonical_conversation_survives_replay_and_excludes_current_and_other_threads() {
+        let root = tempfile::tempdir().unwrap();
+        let service =
+            OperatorSessionService::new(OperatorJournal::new(root.path().to_path_buf()).unwrap());
+        let first = service
+            .start_turn(
+                "default",
+                StartTurnRequest::auto("first-context", "remember the cobalt fixture"),
+            )
+            .unwrap();
+        for (kind, payload) in [
+            (
+                OperatorEventType::AssistantCompleted,
+                json!({"text":"verified violet-17"}),
+            ),
+            (OperatorEventType::TurnCompleted, json!({})),
+        ] {
+            service
+                .append_event(new_event(
+                    "default",
+                    Some(first.turn_id.clone()),
+                    None,
+                    kind,
+                    now_iso(),
+                    OperatorActor {
+                        kind: "runtime".into(),
+                        id: "test".into(),
+                    },
+                    payload,
+                ))
+                .unwrap();
+        }
+        let current = service
+            .start_turn(
+                "default",
+                StartTurnRequest::auto("next-context", "current prompt must not duplicate"),
+            )
+            .unwrap();
+        service
+            .start_turn(
+                "other",
+                StartTurnRequest::auto("other-context", "other thread must remain private"),
+            )
+            .unwrap();
+        let reloaded =
+            OperatorSessionService::new(OperatorJournal::new(root.path().to_path_buf()).unwrap());
+        let blocks = reloaded
+            .conversation_blocks("default", &current.turn_id, 4096)
+            .unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert!(
+            matches!(&blocks[0],heiwa_protocol::TranscriptBlock::User(text) if text=="remember the cobalt fixture")
+        );
+        assert!(
+            matches!(&blocks[1],heiwa_protocol::TranscriptBlock::Assistant(text) if text=="verified violet-17")
+        );
+        assert!(reloaded
+            .conversation_blocks("default", &current.turn_id, 3)
+            .unwrap()
+            .is_empty());
+    }
 
     #[test]
     fn read_only_replay_does_not_wait_for_a_write_transaction() {

@@ -122,7 +122,8 @@ export function FirstRun(props: ProviderConnectionActions & {
         <Show when={props.state.workspace}>
           <ProviderConnections connections={props.state.workspace?.connections ?? []}
             executions={props.executions}
-            onConnectApiProvider={props.onConnectApiProvider}
+            onConnectCodex={props.onConnectCodex}
+          onConnectApiProvider={props.onConnectApiProvider}
             onVerifyApiProvider={props.onVerifyApiProvider}
             onDisconnectApiProvider={props.onDisconnectApiProvider} />
           <div class="resource-section">

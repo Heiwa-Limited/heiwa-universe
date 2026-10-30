@@ -126,6 +126,7 @@ pub fn run() {
             onboarding::complete_workspace_setup,
             onboarding::open_resource_guide,
             onboarding::connect_api_provider,
+            onboarding::connect_codex_subscription,
             onboarding::verify_api_provider,
             onboarding::disconnect_api_provider,
             operator_stream::operator_subscribe,

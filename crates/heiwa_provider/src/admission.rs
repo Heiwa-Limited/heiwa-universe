@@ -42,6 +42,7 @@ pub enum ProviderAdmissionDenial {
 pub struct RegistryAdmittedLane {
     account: ProviderAccount,
     model: DetectedModel,
+    execution_endpoint: Option<String>,
 }
 
 impl RegistryAdmittedLane {
@@ -56,6 +57,23 @@ impl RegistryAdmittedLane {
     }
     pub fn model_id(&self) -> &str {
         &self.model.model_id
+    }
+    /// A local-runtime label is not proof that its configured endpoint is on
+    /// this device. Strict local privacy accepts only literal loopback hosts.
+    pub fn is_on_device(&self) -> bool {
+        self.execution_endpoint
+            .as_deref()
+            .is_some_and(crate::detect::ollama::endpoint_is_on_device)
+    }
+    pub fn runtime_endpoint(&self) -> Option<&str> {
+        self.execution_endpoint.as_deref()
+    }
+
+    pub fn supports_tools(&self) -> bool {
+        self.model.supports_tools
+    }
+    pub fn context_window(&self) -> u32 {
+        self.model.context_window
     }
     pub fn rate_group(&self) -> &str {
         &self.account.rate_group
@@ -96,7 +114,7 @@ impl RegistryAdmittedLane {
         let current = admit_account(account, self.provider_model_id(), |binary| {
             crate::resolve_command(binary).is_some()
         })?;
-        if current.model != self.model {
+        if current.model != self.model || current.execution_endpoint != self.execution_endpoint {
             return Err(ProviderAdmissionDenial::AccountChanged);
         }
         Ok(())
@@ -182,7 +200,18 @@ pub(crate) fn admit_account(
     if !model_is_admissible(account, model) {
         return Err(ProviderAdmissionDenial::ModelInventoryUnverified);
     }
+    let execution_endpoint = if let Credential::LocalRuntime { endpoint } = &account.credential {
+        Some(
+            crate::detect::ollama::resolve_configured_endpoint(Some(endpoint))
+                .map_err(|_| ProviderAdmissionDenial::AccountUnavailable)?
+                .as_str()
+                .to_string(),
+        )
+    } else {
+        None
+    };
     Ok(RegistryAdmittedLane {
+        execution_endpoint,
         account: account.clone(),
         model: model.clone(),
     })

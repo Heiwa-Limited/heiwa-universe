@@ -109,3 +109,16 @@
   .chat-messages { scroll-behavior: auto; }
   .chat-msg.transient .chat-body::after { animation: none; }
 }
+
+.execution-timeline { display: grid; gap: 8px; margin: 12px 0; }
+.execution-status, .execution-action summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.execution-action, .execution-approval { padding: 10px 12px; border: 1px solid var(--border, #5555); border-radius: 8px; }
+.execution-action summary { cursor: pointer; font-size: 13px; }
+.execution-action summary span { opacity: .7; }
+.execution-action pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font-size: 12px; }
+.execution-approval button { margin-right: 8px; }
+.composer-channel { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+.composer-channel select { max-width: 220px; color: inherit; background: var(--bg, #222); border: 1px solid var(--border, #5555); border-radius: 6px; padding: 4px 8px; }
+
+.verified-action { display: grid; gap: 5px; padding: 10px 12px; margin-bottom: 5px; border-left: 3px solid var(--accent, #93b9a0); background: var(--surface, #8881); border-radius: 6px; }
+.verified-action code, .verified-action small { overflow-wrap: anywhere; font-size: 12px; }

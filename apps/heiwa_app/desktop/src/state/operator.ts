@@ -30,7 +30,8 @@ export type OperatorState = {
   ready: Accessor<boolean>;
   start: (threadId: string, workId?: string) => Promise<void>;
   reconnect: () => Promise<void>;
-  submit: (prompt: string) => Promise<void>;
+  submit: (prompt: string, policy?: import("../operator/types").OperatorRoutePolicy) => Promise<void>;
+  cancel: (turnId: string) => Promise<void>;
   dispose: () => void;
 };
 
@@ -39,6 +40,7 @@ export type OperatorStateOptions = Partial<
 > & {
   /** Defers a publish. Swapped in tests for synchronous flushing. */
   schedule?: (task: () => void) => void;
+  cancel?: (path: string, body: Record<string, never>) => Promise<unknown>;
 };
 
 function defaultSchedule(task: () => void): void {
@@ -83,8 +85,13 @@ export function createOperatorState(options: OperatorStateOptions = {}): Operato
     ready: () => status() === "ready",
     start: (threadId, workId) => client.start(threadId, workId),
     reconnect: () => client.reconnect(),
-    submit: async (prompt) => {
-      await client.submitTurn(prompt);
+    cancel: async (turnId) => {
+      if (!store.snapshot().turns.some((turn) => turn.turnId === turnId)) throw new Error("unknown_operator_turn");
+      await (options.cancel ?? apiPost)(`/api/v1/operator/turns/${encodeURIComponent(turnId)}/cancel`, {});
+      publish();
+    },
+    submit: async (prompt, policy) => {
+      await client.submitTurn(prompt, policy);
       publish();
     },
     dispose: () => client.dispose(),

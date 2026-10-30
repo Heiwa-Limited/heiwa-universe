@@ -59,6 +59,7 @@ shell_state_targets=(
 )
 
 shell_ops_targets=(
+  agent_tools
   apple_mail_connector
   apple_calendar_connector
   apple_reminders_connector

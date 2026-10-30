@@ -183,6 +183,75 @@ fn terminate_process_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
+/// Capture a governed command's stdout and stderr in a caller-owned private
+/// spool. Unlike native protocol reads, nonzero exits are returned as data so
+/// the operator can diagnose and repair work. Bounds apply while it runs.
+pub fn bounded_command_output(
+    command: &mut Command,
+    spool: &mut std::fs::File,
+    timeout: Duration,
+    max_bytes: usize,
+) -> Result<(std::process::ExitStatus, Vec<u8>), String> {
+    use std::io::{Seek, SeekFrom};
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(spool.try_clone().map_err(|e| e.to_string())?))
+        .stderr(Stdio::from(spool.try_clone().map_err(|e| e.to_string())?));
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setpgid(0, 0) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+    }
+    let mut child = command.spawn().map_err(|e| e.to_string())?;
+    let start = Instant::now();
+    let status = loop {
+        let size = match spool.metadata() {
+            Ok(metadata) => metadata.len(),
+            Err(error) => {
+                terminate_process_tree(&mut child);
+                return Err(error.to_string());
+            }
+        };
+        if size > max_bytes as u64 {
+            terminate_process_tree(&mut child);
+            return Err("Command output limit exceeded".into());
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                terminate_process_tree(&mut child);
+                return Err(error.to_string());
+            }
+        }
+        if start.elapsed() >= timeout {
+            terminate_process_tree(&mut child);
+            return Err("Command timed out; its process group was stopped".into());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    // Background children must not outlive the command receipt.
+    terminate_process_tree(&mut child);
+    spool.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::new();
+    spool
+        .take(max_bytes as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > max_bytes {
+        return Err("Command output limit exceeded".into());
+    }
+    Ok((status, bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

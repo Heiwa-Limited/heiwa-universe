@@ -181,6 +181,7 @@ export function App(props: AppProps) {
           onVerifyProviders={props.onVerifyProviders}
           onCompleteWorkspace={props.onCompleteWorkspace ? finish : undefined}
           onOpenResourceGuide={props.onOpenResourceGuide}
+          onConnectCodex={props.onConnectCodex}
           onConnectApiProvider={props.onConnectApiProvider}
           onVerifyApiProvider={props.onVerifyApiProvider}
           onDisconnectApiProvider={props.onDisconnectApiProvider}

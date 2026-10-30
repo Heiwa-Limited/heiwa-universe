@@ -1,3 +1,4 @@
+pub(crate) mod agent_tools;
 pub mod app;
 pub mod apple_resources;
 pub mod approvals;

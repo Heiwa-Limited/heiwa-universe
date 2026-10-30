@@ -33,6 +33,7 @@ heiwa_worker = { path = "../../crates/heiwa_worker" }
 heiwa_workspace = { path = "../../crates/heiwa_workspace" }
 anyhow = "1.0"
 async-trait = "0.1"
+schemars = "0.8"
 base64 = "0.22"
 heiwa-core = { path = "../../apps/heiwa_core" }
 heiwa-session = { path = "../../crates/heiwa_session" }

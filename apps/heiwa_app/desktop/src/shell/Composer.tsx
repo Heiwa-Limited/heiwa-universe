@@ -12,6 +12,7 @@ export function Composer(props: { caption: string }) {
   const app = useApp();
   let input: HTMLTextAreaElement | undefined;
   const [responseOpen, setResponseOpen] = createSignal(false);
+  const [channel, setChannel] = createSignal("auto");
   const [sending, setSending] = createSignal(false);
   const [error, setError] = createSignal<string>();
   onMount(() => {
@@ -47,7 +48,7 @@ export function Composer(props: { caption: string }) {
     setError(undefined);
     setResponseOpen(true);
     try {
-      await app.operator.submit(text);
+      await app.operator.submit(text, channel() === "codex" ? { mode: "explicit", preferred_provider: "codex" } : { mode: channel() === "local" ? "local_only" : "auto" });
       // Do not erase text the user typed while the request was in flight.
       if (sessionId) app.sessions.clearDraftIfUnchanged(sessionId, draft);
       void app.sessions.refresh();
@@ -87,6 +88,11 @@ export function Composer(props: { caption: string }) {
           <button class="response-reopen" onClick={() => setResponseOpen(true)}><Icon name="sessions" size={14} />Show conversation</button>
         </Show>
       </div>
+      <label class="composer-channel">Inference
+        <select aria-label="Inference channel" value={channel()} onChange={(event) => setChannel(event.currentTarget.value)} disabled={sending()}>
+          <option value="auto">Automatic</option><option value="local">On-device models only</option><option value="codex">OpenAI / Codex</option>
+        </select>
+      </label>
       <div class="composer-wrap">
         <span class="composer-mark"><Icon name="heiwa" size={22} /></span>
         <textarea

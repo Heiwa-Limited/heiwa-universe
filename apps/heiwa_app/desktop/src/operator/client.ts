@@ -129,7 +129,7 @@ export class OperatorClient {
     }
   }
 
-  async submitTurn(prompt: string): Promise<OperatorTurnSubmissionResponse> {
+  async submitTurn(prompt: string, routePolicy: import("./types").OperatorRoutePolicy = { mode: "auto" }): Promise<OperatorTurnSubmissionResponse> {
     const threadId = this.threadId;
     const workId = this.workId;
     if (!threadId) throw new Error("operator_client_not_started");
@@ -140,7 +140,7 @@ export class OperatorClient {
     const trimmed = prompt.trim();
     if (!trimmed) throw new Error("prompt_required");
     const unacknowledged = this.unacknowledged;
-    const requestBinding = JSON.stringify([threadId, workId ?? null, trimmed]);
+    const requestBinding = JSON.stringify([threadId, workId ?? null, trimmed, routePolicy.mode, routePolicy.preferred_provider ?? null]);
     const requestId = unacknowledged.get(requestBinding) ?? this.dependencies.randomUUID();
     this.incrementSubmission(generation);
     this.dependencies.onChange?.();
@@ -151,7 +151,7 @@ export class OperatorClient {
         {
           client_request_id: requestId,
           prompt: trimmed,
-          route_policy: { mode: "auto" },
+          route_policy: routePolicy,
           ...(workId === undefined ? {} : { work_id: workId }),
         },
       );

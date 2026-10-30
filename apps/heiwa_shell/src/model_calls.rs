@@ -32,6 +32,7 @@ pub struct ModelCallExecution {
     /// Transient presentation-only deltas. Durable truth is still written
     /// exclusively through `OperatorSessionService`.
     pub delta_tx: Option<mpsc::Sender<StreamEvent>>,
+    pub tools: heiwa_provider::adapter::ProviderTools,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -61,6 +62,7 @@ pub struct ModelCallResult {
     pub provider_model_id: String,
     pub rate_group: String,
     pub text: String,
+    pub native_tools: bool,
     pub usage: TokenUsage,
     pub attempts: usize,
     pub failed_models: Vec<String>,
@@ -204,7 +206,7 @@ fn registry_selection_with_ids(
     }
     let mut witnesses = HashMap::new();
     let mut selected = Vec::new();
-    for candidate in candidates {
+    for mut candidate in candidates {
         if counts.get(&candidate.tier.id) != Some(&1)
             || admitted_counts.get(&candidate.tier.id) != Some(&1)
         {
@@ -223,6 +225,15 @@ fn registry_selection_with_ids(
         if let Some(entry) = matches.next() {
             // An ambiguous/colliding candidate cannot lend identity to a lane.
             if matches.next().is_none() {
+                candidate.locality = if entry.lane.is_on_device() {
+                    heiwa_core::drex::ExecutionLocality::OnDevice
+                } else {
+                    heiwa_core::drex::ExecutionLocality::Remote
+                };
+                if !entry.lane.is_on_device() && candidate.cost_truth == CostTruth::LocalZeroCost {
+                    candidate.cost_truth = CostTruth::CannotConfirm;
+                    candidate.marginal_cost_usd = None;
+                }
                 witnesses.insert(candidate.tier.id, entry.lane.clone());
                 selected.push(candidate);
             }
@@ -425,6 +436,7 @@ impl ModelCallExecutor {
             };
 
             let channel = adapter.execution_channel();
+            let native_tools = adapter.supports_native_tools();
             let started = Instant::now();
             match run_adapter(
                 adapter,
@@ -432,6 +444,11 @@ impl ModelCallExecutor {
                 &execution.messages,
                 &mut execution.cancel,
                 execution.delta_tx.as_ref(),
+                heiwa_provider::adapter::ProviderTools {
+                    provider: provider.clone(),
+                    model: provider_model_id.clone(),
+                    ..execution.tools.clone()
+                },
             )
             .await
             {
@@ -541,6 +558,7 @@ impl ModelCallExecutor {
                         provider_model_id,
                         rate_group: candidate.tier.rate_group,
                         text,
+                        native_tools,
                         usage,
                         attempts,
                         failed_models,
@@ -877,6 +895,7 @@ impl heiwa_loop::LoopModelCaller for ExecutorLoopCaller {
                 max_attempts: request.max_attempts,
                 cancel: request.cancel,
                 delta_tx: None,
+                tools: Default::default(),
             })
             .await?;
         Ok(heiwa_loop::LoopCallResult {
@@ -976,7 +995,7 @@ fn failed_attempt_record(
     }
 }
 
-fn add_cumulative_cost(
+pub(crate) fn add_cumulative_cost(
     total: &mut f64,
     aggregate_truth: &mut Option<CostTruth>,
     cost_usd: Option<f64>,
@@ -1064,6 +1083,7 @@ async fn run_adapter(
     messages: &[Message],
     cancel: &mut watch::Receiver<bool>,
     delta_tx: Option<&mpsc::Sender<StreamEvent>>,
+    tools: heiwa_provider::adapter::ProviderTools,
 ) -> Result<(String, TokenUsage, bool), AdapterRunError> {
     if *cancel.borrow() {
         return Err(AdapterRunError::Cancelled);
@@ -1073,9 +1093,13 @@ async fn run_adapter(
     let adapter_task = adapter.clone();
     let model = model.to_string();
     let messages = messages.to_vec();
+    let tool_activity = tools.activity.clone();
     let task = tokio::spawn(async move {
         let error_tx = stream_tx.clone();
-        if let Err(error) = adapter_task.send(&model, &messages, stream_tx).await {
+        if let Err(error) = adapter_task
+            .send_with_tools(&model, &messages, stream_tx, tools)
+            .await
+        {
             let _ = error_tx
                 .send(StreamEvent::Error(format!("adapter error: {error}")))
                 .await;
@@ -1096,6 +1120,7 @@ async fn run_adapter(
     let mut task = AbortProviderOnDrop(Some(task));
 
     let mut text = String::new();
+    let mut tool_calls = Vec::new();
     let mut emitted_delta = false;
     let mut cancel_open = true;
     loop {
@@ -1105,6 +1130,9 @@ async fn run_adapter(
                 match event {
                     Some(StreamEvent::Token(token)) => {
                         emitted_delta = true;
+                        if text.len() + token.len() > 4*1024*1024 {
+                            return Err(AdapterRunError::Failed { message:"provider answer exceeds 4 MiB".into(), emitted_delta:true });
+                        }
                         text.push_str(&token);
                         if let Some(delta_tx) = delta_tx {
                             let _ = delta_tx.send(StreamEvent::Token(token)).await;
@@ -1118,18 +1146,16 @@ async fn run_adapter(
                                 input: input.clone(),
                             }).await;
                         }
-                        text.push_str(&json!({
-                            "tool_calls": [{
-                                "name": name,
-                                "arguments": input,
-                            }]
-                        }).to_string());
+                        if tool_calls.len()>=48 || input.len()>256*1024 {return Err(AdapterRunError::Failed {message:"provider tool batch exceeds limits".into(),emitted_delta:true});}
+                        let arguments=serde_json::from_str::<serde_json::Value>(&input).map_err(|_|AdapterRunError::Failed {message:"provider tool arguments are not JSON".into(),emitted_delta:true})?;
+                        tool_calls.push(json!({"name":name,"arguments":arguments}));
                     }
                     Some(StreamEvent::Done(usage)) => {
                         if let Some(task) = task.0.take() {
                             task.abort();
                             let _ = task.await;
                         }
+                        if !tool_calls.is_empty() {text=json!({"tool_calls":tool_calls}).to_string();}
                         return Ok((text, usage, emitted_delta));
                     }
                     Some(StreamEvent::Error(error)) => {
@@ -1139,7 +1165,7 @@ async fn run_adapter(
                         }
                         return Err(AdapterRunError::Failed {
                             message: error,
-                            emitted_delta,
+                            emitted_delta: emitted_delta || tool_activity.load(std::sync::atomic::Ordering::Acquire),
                         });
                     }
                     None => {
@@ -1149,7 +1175,7 @@ async fn run_adapter(
                         }
                         return Err(AdapterRunError::Failed {
                             message: "provider stream ended without completion".to_string(),
-                            emitted_delta,
+                            emitted_delta: emitted_delta || tool_activity.load(std::sync::atomic::Ordering::Acquire),
                         });
                     }
                 }

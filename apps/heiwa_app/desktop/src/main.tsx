@@ -92,6 +92,7 @@ render(
       onVerifyProviders={() => refreshOnboarding(true)}
       onCompleteWorkspace={completeWorkspace}
       onOpenResourceGuide={openResourceGuide}
+      onConnectCodex={() => changeProviderConnection("connect_codex_subscription", {})}
       onConnectApiProvider={(provider, apiKey) => changeProviderConnection("connect_api_provider", { provider, apiKey })}
       onVerifyApiProvider={(accountId) => changeProviderConnection("verify_api_provider", { accountId })}
       onDisconnectApiProvider={(accountId) => changeProviderConnection("disconnect_api_provider", { accountId })}

@@ -2377,6 +2377,7 @@ enum OperatorHttpRoute {
     Threads,
     Thread(String),
     ThreadMetadata(String),
+    Workspace(String),
     Catalog,
     Projects,
     ProjectMetadata(String),
@@ -2503,6 +2504,28 @@ async fn operator_http_response(
                     json!({"ok": true, "data": {"thread_id": thread_id, "created": created, "thread": thread}}),
                 ),
                 Err(_) => operator_error(503, "operator_unavailable"),
+            }
+        }
+        (method @ ("GET" | "POST"), OperatorHttpRoute::Workspace(thread_id)) => {
+            if sessions.thread(&thread_id).is_err() {
+                return operator_error(404, "unknown_thread");
+            }
+            let choose = method == "POST";
+            let result = tokio::task::spawn_blocking(move || {
+                if choose {
+                    crate::cmd::agent_tools::select_workspace(&thread_id)
+                } else {
+                    crate::cmd::agent_tools::workspace_status(&thread_id)
+                }
+            })
+            .await;
+            match result {
+                Ok(Ok(value)) => (200, json!({"ok":true,"data":value})),
+                Ok(Err(error)) => (
+                    422,
+                    json!({"ok":false,"error":{"code":"workspace_unavailable","message":error.to_string()}}),
+                ),
+                Err(_) => operator_error(503, "workspace_unavailable"),
             }
         }
         ("GET", OperatorHttpRoute::Thread(thread_id)) => match sessions.thread(&thread_id) {
@@ -2688,6 +2711,9 @@ fn parse_operator_route(path: &str) -> std::result::Result<Option<OperatorHttpRo
         ["api", "v1", "operator", "threads", thread_id] => Ok(Some(OperatorHttpRoute::Thread(
             decode_operator_path_id(thread_id)?,
         ))),
+        ["api", "v1", "operator", "threads", thread_id, "workspace"] => Ok(Some(
+            OperatorHttpRoute::Workspace(decode_operator_path_id(thread_id)?),
+        )),
         ["api", "v1", "operator", "threads", thread_id, "events"] => Ok(Some(
             OperatorHttpRoute::Events(decode_operator_path_id(thread_id)?),
         )),

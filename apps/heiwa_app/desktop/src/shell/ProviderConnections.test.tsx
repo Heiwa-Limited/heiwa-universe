@@ -191,3 +191,16 @@ describe("execution history on account rows", () => {
     expect(screen.getByRole("listitem").textContent).not.toContain("run");
   });
 });
+
+it("verifies the Codex subscription only on an explicit click and prevents duplicate inference", async () => {
+  let finish!: () => void;
+  const connect = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+  render(() => <ProviderConnections connections={[]} onConnectCodex={connect} />);
+  expect(connect).not.toHaveBeenCalled();
+  const button = screen.getByRole("button", { name: "Verify Codex subscription" });
+  fireEvent.click(button); fireEvent.click(button);
+  expect(connect).toHaveBeenCalledTimes(1);
+  expect(button.hasAttribute("disabled")).toBe(true);
+  finish();
+  await waitFor(() => expect(screen.getByText(/completed a real Heiwa tool call/)).toBeTruthy());
+});

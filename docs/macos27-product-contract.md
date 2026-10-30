@@ -240,3 +240,14 @@ flow; then Apple event/message-to-reminder and draft workflows over shared Rust
 effect services. Each vertical slice must work from a fresh profile through a
 real artifact or persisted source-app result. Do not replace these outcomes with
 additional dashboard tiles or capability declarations that have no executor.
+
+### Owner native-tool execution checkpoint (2026-10-30)
+
+The [governed native agent decision](design/2026-10-30-agent-execution-and-native-tools.md)
+adds owner-chat tool execution through Codex app-server and structured Ollama
+chat. Calendar retains approval-staged creation. Reminders adds owner-approved
+selected-list creation/completion through the native helper; the R1 CLI
+read/propose boundary and separate C1-b worker-admission requirement remain.
+Notes and Files now have bounded owner tools, and process execution is confined
+to its workspace by the macOS sandbox. The decision's matrix is the implemented
+scope, not completion of this contract's full Apple/AI target.

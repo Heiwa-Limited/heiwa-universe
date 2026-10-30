@@ -104,7 +104,8 @@ export type OperatorCatalogResponse = {
 };
 
 export type OperatorRoutePolicy = {
-  mode: "auto";
+  mode: "auto" | "local_only" | "explicit";
+  preferred_provider?: string;
 };
 
 export type OperatorTurnSubmission = {

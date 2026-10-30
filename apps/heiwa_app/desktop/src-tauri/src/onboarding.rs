@@ -150,3 +150,11 @@ pub async fn open_resource_guide(resource_id: String) -> Result<(), String> {
         Err("Resource setup guides currently require macOS.".into())
     }
 }
+
+#[tauri::command]
+pub async fn connect_codex_subscription() -> Result<DesktopOnboardingState, String> {
+    heiwa_provider::connections::connect_codex(None)
+        .await
+        .map_err(|error| error.to_string())?;
+    onboarding_state(None).await
+}

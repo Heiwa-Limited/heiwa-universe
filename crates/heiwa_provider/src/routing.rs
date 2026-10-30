@@ -253,6 +253,17 @@ impl ProviderAdapter for AdmittedAdapter {
         messages: &[Message],
         tx: mpsc::Sender<StreamEvent>,
     ) -> anyhow::Result<()> {
+        self.send_with_tools(model, messages, tx, Default::default())
+            .await
+    }
+
+    async fn send_with_tools(
+        &self,
+        model: &str,
+        messages: &[Message],
+        tx: mpsc::Sender<StreamEvent>,
+        tools: crate::adapter::ProviderTools,
+    ) -> anyhow::Result<()> {
         let current_denial = if self.current_registry {
             match AccountRegistry::load_strict() {
                 Ok(registry) => self.lane.validate_current(&registry).err(),
@@ -278,11 +289,14 @@ impl ProviderAdapter for AdmittedAdapter {
             return Err(denial.into());
         }
         self.transport
-            .send(self.lane.provider_model_id(), messages, tx)
+            .send_with_tools(self.lane.provider_model_id(), messages, tx, tools)
             .await
     }
     async fn interrupt(&self) -> anyhow::Result<()> {
         self.transport.interrupt().await
+    }
+    fn supports_native_tools(&self) -> bool {
+        self.transport.supports_native_tools()
     }
     fn supported_models(&self) -> Vec<String> {
         vec![self.lane.provider_model_id().to_string()]

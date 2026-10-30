@@ -14,6 +14,9 @@ pub(crate) fn run_applescript(
         .filter(|path| !path.is_empty())
         .unwrap_or_else(|| "/usr/bin/osascript".into());
     let mut command = Command::new(&executable);
+    // Standalone Apple Events reads must not inherit launchd's runtime XPC
+    // identity; the responsible application remains Heiwa.
+    command.env_remove("XPC_SERVICE_NAME");
     command.args(["-e", script]).args(args);
     heiwa_core::subprocess::bounded_output(&mut command, timeout, 4 * 1024 * 1024).map_err(
         |error| {

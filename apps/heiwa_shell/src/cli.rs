@@ -4,6 +4,10 @@ use crate::cmd;
 
 pub async fn try_handle(args: &[String]) -> Result<bool> {
     match args.get(1).map(String::as_str) {
+        Some("tools") => {
+            cmd::agent_tools::run(&args[2..]).await?;
+            Ok(true)
+        }
         Some("workflows") => {
             cmd::workflows::run(&args[2..])?;
             Ok(true)

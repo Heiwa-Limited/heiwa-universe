@@ -30,6 +30,11 @@ const fn command(name: &'static str, usage: &'static str, summary: &'static str)
 
 pub const COMMANDS: &[CommandSpec] = &[
     command(
+        "tools",
+        "tools list|show <tool>|run <tool> [--args JSON|--args-file PATH] [--workspace PATH] --json",
+        "Shared scoped tools for users and agents",
+    ),
+    command(
         "install",
         "install [gh:owner/repo[@ref]]",
         "Bootstrap Heiwa or install a GitHub plugin",

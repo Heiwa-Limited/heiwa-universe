@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
@@ -54,6 +55,7 @@ impl RepoGrep {
 struct FsReadInput {
     path: String,
     #[serde(default = "default_max_bytes")]
+    #[schemars(range(min = 1, max = 262144))]
     max_bytes: usize,
 }
 
@@ -69,6 +71,7 @@ struct RepoGrepInput {
     #[serde(default = "default_dot")]
     path: String,
     #[serde(default = "default_max_matches")]
+    #[schemars(range(min = 1, max = 200))]
     max_matches: usize,
 }
 
@@ -109,12 +112,28 @@ impl Tool for FsRead {
         if !resolved.absolute.is_file() {
             return Err(McpError::Tool(format!("not a file: {}", resolved.relative)));
         }
-        let mut content = fs::read_to_string(&resolved.absolute)
-            .map_err(|error| McpError::Tool(format!("read failed: {error}")))?;
-        let truncated = content.len() > input.max_bytes;
-        if truncated {
-            content.truncate(input.max_bytes);
+        if input.max_bytes == 0 || input.max_bytes > 256 * 1024 {
+            return Err(McpError::Tool(
+                "max_bytes must be between 1 and 262144".into(),
+            ));
         }
+        let file = fs::File::open(&resolved.absolute)
+            .map_err(|error| McpError::Tool(format!("read failed: {error}")))?;
+        let mut bytes = Vec::new();
+        file.take(input.max_bytes as u64 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| McpError::Tool(format!("read failed: {error}")))?;
+        let truncated = bytes.len() > input.max_bytes;
+        bytes.truncate(input.max_bytes);
+        if let Err(error) = std::str::from_utf8(&bytes) {
+            if truncated && error.error_len().is_none() {
+                bytes.truncate(error.valid_up_to());
+            } else {
+                return Err(McpError::Tool("file is not UTF-8 text".into()));
+            }
+        }
+        let content = String::from_utf8(bytes)
+            .map_err(|_| McpError::Tool("file is not UTF-8 text".into()))?;
         Ok(json!({
             "path": resolved.relative,
             "content": content,
@@ -159,6 +178,7 @@ impl Tool for FsList {
         let mut entries = Vec::new();
         for entry in fs::read_dir(&resolved.absolute)
             .map_err(|error| McpError::Tool(format!("list failed: {error}")))?
+            .take(501)
         {
             let entry = entry.map_err(|error| McpError::Tool(format!("list failed: {error}")))?;
             let path = entry.path();
@@ -175,6 +195,8 @@ impl Tool for FsList {
                 "kind": kind,
             }));
         }
+        let truncated = entries.len() > 500;
+        entries.truncate(500);
         entries.sort_by(|a, b| {
             a["path"]
                 .as_str()
@@ -184,6 +206,7 @@ impl Tool for FsList {
         Ok(json!({
             "path": resolved.relative,
             "entries": entries,
+            "truncated":truncated,
         }))
     }
 }
@@ -209,22 +232,39 @@ impl Tool for RepoGrep {
                 tool: self.name().to_string(),
                 source,
             })?;
-        if input.pattern.is_empty() {
-            return Err(McpError::Tool("pattern is required".to_string()));
+        if input.pattern.is_empty()
+            || input.pattern.len() > 1024
+            || input.max_matches == 0
+            || input.max_matches > 200
+        {
+            return Err(McpError::Tool(
+                "pattern must be 1..1024 bytes and max_matches 1..200".to_string(),
+            ));
         }
         let resolved = resolve_existing_path(&self.scope, &input.path)?;
         let mut matches = Vec::new();
+        let mut budget = GrepBudget {
+            started: std::time::Instant::now(),
+            entries: 0,
+            bytes: 0,
+            truncated: false,
+        };
         grep_path(
             &self.scope,
             &resolved.absolute,
             &input.pattern,
             input.max_matches,
             &mut matches,
+            &mut budget,
+            0,
         )?;
         Ok(json!({
             "path": resolved.relative,
             "pattern": input.pattern,
             "matches": matches,
+            "truncated":budget.truncated || matches.len()>=input.max_matches,
+            "scanned_entries":budget.entries,
+            "scope":"symlinks are not followed; 2000 entries, 16 MiB total, 1 MiB/file, depth 32, five second scan budget",
         }))
     }
 }
@@ -273,16 +313,34 @@ fn relative_to_scope(scope: &ExecutionScope, path: &Path) -> String {
     }
 }
 
+struct GrepBudget {
+    started: std::time::Instant,
+    entries: usize,
+    bytes: usize,
+    truncated: bool,
+}
+
 fn grep_path(
     scope: &ExecutionScope,
     path: &Path,
     pattern: &str,
     max_matches: usize,
     matches: &mut Vec<Value>,
+    budget: &mut GrepBudget,
+    depth: usize,
 ) -> Result<()> {
     if matches.len() >= max_matches {
         return Ok(());
     }
+    if budget.entries >= 2000
+        || budget.bytes >= 16 * 1024 * 1024
+        || depth > 32
+        || budget.started.elapsed() >= std::time::Duration::from_secs(5)
+    {
+        budget.truncated = true;
+        return Ok(());
+    }
+    budget.entries += 1;
     let path = fs::canonicalize(path)
         .map_err(|error| McpError::Tool(format!("grep path resolve failed: {error}")))?;
     if !scope.allows_path(&path) {
@@ -299,12 +357,35 @@ fn grep_path(
         }
         let mut entries = fs::read_dir(&path)
             .map_err(|error| McpError::Tool(format!("grep list failed: {error}")))?
+            .take(2001)
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|error| McpError::Tool(format!("grep list failed: {error}")))?;
+        if entries.len() > 2000 {
+            budget.truncated = true;
+            entries.truncate(2000);
+        }
         entries.sort_by_key(|entry| entry.path());
         for entry in entries {
-            grep_path(scope, &entry.path(), pattern, max_matches, matches)?;
-            if matches.len() >= max_matches {
+            if entry
+                .file_type()
+                .map(|kind| kind.is_symlink())
+                .unwrap_or(true)
+            {
+                continue;
+            }
+            grep_path(
+                scope,
+                &entry.path(),
+                pattern,
+                max_matches,
+                matches,
+                budget,
+                depth + 1,
+            )?;
+            if matches.len() >= max_matches
+                || budget.entries >= 2000
+                || budget.bytes >= 16 * 1024 * 1024
+            {
                 break;
             }
         }
@@ -313,7 +394,26 @@ fn grep_path(
     if !path.is_file() {
         return Ok(());
     }
-    let Ok(content) = fs::read_to_string(&path) else {
+    if fs::metadata(&path)
+        .map(|metadata| metadata.len() > 1024 * 1024)
+        .unwrap_or(true)
+    {
+        budget.truncated = true;
+        return Ok(());
+    }
+    let Ok(file) = fs::File::open(&path) else {
+        return Ok(());
+    };
+    let mut bytes = Vec::new();
+    if file.take(1024 * 1024 + 1).read_to_end(&mut bytes).is_err() {
+        return Ok(());
+    }
+    budget.bytes += bytes.len();
+    if bytes.len() > 1024 * 1024 {
+        budget.truncated = true;
+        return Ok(());
+    }
+    let Ok(content) = String::from_utf8(bytes) else {
         return Ok(());
     };
     for (index, line) in content.lines().enumerate() {
@@ -321,7 +421,8 @@ fn grep_path(
             matches.push(json!({
                 "path": relative_to_scope(scope, &path),
                 "line_number": index + 1,
-                "line": line,
+                "line": line.chars().take(2048).collect::<String>(),
+                "line_truncated":line.chars().count()>2048,
             }));
             if matches.len() >= max_matches {
                 break;
