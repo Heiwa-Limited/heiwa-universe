@@ -80,7 +80,7 @@ function Reminders() {
     </header>
     <Show when={error()}><p class="mail-error" role="alert">{error()}</p></Show>
     <Show when={status() && status()!.status !== "connected"}>
-      <p class="mail-policy">macOS will ask whether Heiwa may access Reminders. Heiwa reads only the lists you choose and never changes your reminders.</p>
+      <p class="mail-policy">Choose the lists Heiwa may read. In a conversation, Heiwa can create reminders or change completion in these lists after your approval. Other changes are not supported.</p>
     </Show>
 
     <Show when={status()?.status === "connected"}>

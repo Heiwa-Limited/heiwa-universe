@@ -677,11 +677,6 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
-                    "verify-codex" => {
-                        let model = args.get(3).map(String::as_str);
-                        let verified = heiwa_provider::connections::connect_codex(model).await?;
-                        println!("Verified Codex subscription and host tool execution: {verified}");
-                    }
                     "add-key" => {
                         if args.len() < 5 {
                             println!("Usage: heiwa auth add-key <provider> <api-key>");

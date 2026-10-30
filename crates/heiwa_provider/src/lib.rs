@@ -386,6 +386,35 @@ fn provider_search_paths_with_system_dirs(
     dirs
 }
 
+fn execution_path_with(
+    home: &Path,
+    runtime_root: &Path,
+    current: &str,
+    system_dirs: &[&str],
+) -> std::ffi::OsString {
+    let mut dirs: Vec<PathBuf> = env::split_paths(current)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .collect();
+    for dir in provider_search_paths_with_system_dirs(home, runtime_root, system_dirs) {
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    env::join_paths(dirs).unwrap_or_else(|_| current.into())
+}
+
+pub(crate) fn provider_execution_path() -> std::ffi::OsString {
+    let paths = heiwa_config::HeiwaPaths::resolve();
+    let dirs = system_bin_dirs();
+    let dirs: Vec<&str> = dirs.iter().map(String::as_str).collect();
+    execution_path_with(
+        &paths.home_dir,
+        &paths.runtime_root,
+        &env::var("PATH").unwrap_or_default(),
+        &dirs,
+    )
+}
+
 /// Resolve a command against explicit inputs, including which system
 /// directories to consider installed.
 ///
@@ -617,6 +646,33 @@ mod command_resolution_tests {
         assert!(resolved.is_none(), "got {resolved:?}");
         let _ = &shim;
         let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn gui_child_path_resolves_interpreters_from_discovery_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("package-bin");
+        std::fs::create_dir(&bin).unwrap();
+        std::os::unix::fs::symlink("/bin/echo", bin.join("heiwa-test-interpreter")).unwrap();
+        let path = execution_path_with(
+            root.path(),
+            &root.path().join("runtime"),
+            "/usr/bin:/bin",
+            &[bin.to_str().unwrap()],
+        );
+        let output = std::process::Command::new("/usr/bin/env")
+            .args(["heiwa-test-interpreter", "gui-ready"])
+            .env("PATH", path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            "gui-ready"
+        );
+        let isolated = execution_path_with(root.path(), &root.path().join("runtime"), "", &[]);
+        assert!(!std::env::split_paths(&isolated).any(|p| p == Path::new("/opt/homebrew/bin")));
     }
 
     #[test]

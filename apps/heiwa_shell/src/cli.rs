@@ -4,6 +4,10 @@ use crate::cmd;
 
 pub async fn try_handle(args: &[String]) -> Result<bool> {
     match args.get(1).map(String::as_str) {
+        Some("auth") if args.get(2).map(String::as_str) == Some("verify-codex") => {
+            verify_codex(&args[3..]).await?;
+            Ok(true)
+        }
         Some("tools") => {
             cmd::agent_tools::run(&args[2..]).await?;
             Ok(true)
@@ -86,4 +90,32 @@ pub async fn try_handle(args: &[String]) -> Result<bool> {
         }
         _ => Ok(false),
     }
+}
+
+async fn verify_codex(args: &[String]) -> Result<()> {
+    use crate::output;
+    let params: Vec<&str> = args
+        .iter()
+        .filter(|arg| arg.as_str() != "--json")
+        .map(String::as_str)
+        .collect();
+    let usage = "heiwa auth verify-codex [model] [--json]";
+    if params.as_slice() == ["--help"] || params.as_slice() == ["-h"] {
+        return output::emit(
+            output::wants_json(args),
+            serde_json::json!({"usage":usage,"effect":"Runs a small ChatGPT-plan inference and verifies one host tool; saves an exact-model connection."}),
+            &[],
+            |_| println!("{usage}"),
+        );
+    }
+    if params.len() > 1 || params.iter().any(|value| value.starts_with('-')) {
+        anyhow::bail!(output::CliError::usage(usage));
+    }
+    let verified = heiwa_provider::connections::connect_codex(params.first().copied()).await?;
+    output::emit(
+        output::wants_json(args),
+        serde_json::json!({"channel":"codex-app-server","model":verified,"verified":true,"proof":"completed host-tool challenge"}),
+        &[],
+        |_| println!("Verified Codex subscription and host tool execution: {verified}"),
+    )
 }

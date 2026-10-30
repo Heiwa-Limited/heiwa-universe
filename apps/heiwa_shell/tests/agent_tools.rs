@@ -25,6 +25,19 @@ fn data(output: Output) -> Value {
     value["data"].clone()
 }
 #[test]
+fn codex_verification_rejects_unknown_flags_before_starting_inference() {
+    let root = tempfile::tempdir().unwrap();
+    let result = run(
+        root.path(),
+        &["auth", "verify-codex", "--unknown", "--json"],
+    );
+    assert!(!result.status.success());
+    let value: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(value["ok"], false);
+    assert!(value.to_string().contains("heiwa auth verify-codex"));
+}
+
+#[test]
 fn catalog_and_one_tool_schema_are_discoverable_without_inference_or_native_access() {
     let root = tempfile::tempdir().unwrap();
     let catalog = data(run(root.path(), &["tools", "list", "--json"]));

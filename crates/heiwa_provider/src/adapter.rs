@@ -80,6 +80,10 @@ impl ProviderTools {
 /// Ensure aborting an adapter future also terminates its provider CLI child.
 pub(crate) fn configure_cli_command(command: &mut tokio::process::Command) {
     command.kill_on_drop(true);
+    // GUI launches have a minimal PATH. A discovered npm CLI still needs its
+    // interpreter (for example Homebrew Node); use the same bounded search
+    // directories as discovery, without sourcing user shell startup files.
+    command.env("PATH", crate::provider_execution_path());
     #[cfg(unix)]
     command.process_group(0);
 }

@@ -124,6 +124,11 @@ The CLI app-server dynamic-tool interface is experimental and version-sensitive;
 unknown methods/features must produce a visible failure, never a silent legacy
 execution fallback.
 
+Installed-app acceptance caught a GUI-only interpreter failure: finding an npm
+launcher does not put Node on a macOS app's minimal PATH. Provider children now
+use discovery's explicit binary directories, preserving the caller's priority
+and sandbox overrides without sourcing interactive shell configuration.
+
 Primary references:
 
 - [Codex app-server](https://learn.chatgpt.com/docs/app-server)
