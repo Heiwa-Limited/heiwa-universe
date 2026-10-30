@@ -60,7 +60,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     ),
     command(
         "auth",
-        "auth status|add-key|login|logout",
+        "auth status|add-key|login|logout|verify-codex [model] [--json]",
         "Connected accounts, API keys, and provider CLI login",
     ),
     command(

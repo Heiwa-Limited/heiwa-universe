@@ -60,12 +60,14 @@ fi
 # Reviewed 2026-09-27: explicit Work continuation, scoped acknowledgement,
 # generation-safe switching and idempotent retry after lost acknowledgement.
 # Membership preflight and HTTP admission are tested; store replay is unchanged.
+# Reviewed 2026-10-30: explicit/local inference policy is included in submit
+# and retry identity. Existing store projection and Work binding are unchanged.
 declare -A seam_baseline=(
   ["$desktop/src/operator/store.test.ts"]="7f68b72bc113940349648ef505bc49b52ecd11d21410b046b05fee06b8e6b2a0"
-  ["$desktop/src/operator/client.test.ts"]="d33044d7ab90838c9ac74ddb7460a96ef27e87e3b55cbcd292766a63c1991947"
+  ["$desktop/src/operator/client.test.ts"]="362fa687061c576d6179a3ffab75e3b50648935926d61a871f6f93e626047385"
   ["$desktop/src/operator/store.ts"]="e2ca87af2c7e975b38b7f6eafb90d0ae4f8b5d44b5cf1b12bad5bd33607ae793"
-  ["$desktop/src/operator/client.ts"]="b56f43d7f02c02d488369966fa112dbb278f8024290687a53734801891199af8"
-  ["$desktop/src/operator/types.ts"]="d71840bae42f4202b17eb0b7cf63c049feb5e57b33e2f830ee2975cdfd5d262e"
+  ["$desktop/src/operator/client.ts"]="787e76582bcc217c75c30f392b4ae97d20b3a868d8d0a64dd077b6be79bcd429"
+  ["$desktop/src/operator/types.ts"]="4dba54b4c68877bfbd1ce630b45847b5c07c2fc47a3b4ab5b269cd14d33371cb"
 )
 for file in "${!seam_baseline[@]}"; do
   if [[ ! -f "$file" ]]; then

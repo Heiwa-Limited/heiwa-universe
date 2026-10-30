@@ -70,7 +70,7 @@ function Reminders() {
     <header class="mail-header">
       <div>
         <h2 class="mail-title">Reminders</h2>
-        <p class="mail-subtitle">Read only · lists you choose · nothing leaves this Mac</p>
+        <p class="mail-subtitle">Lists you choose · reading this view stays local</p>
       </div>
       <Show when={error() || (status() && status()!.status !== "connected")}>
         <button class="mail-read" disabled={busy()} onClick={() => void connect()}>
