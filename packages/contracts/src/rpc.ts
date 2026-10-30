@@ -1,4 +1,25 @@
 import {
+  LocalInferenceInput,
+  LocalInferenceInventory,
+  LocalInferenceConnection,
+  LocalInferenceError,
+} from "./localInference.ts";
+import {
+  NativeAction,
+  NativeApprovalInput,
+  NativeInventoryInput,
+  NativeProposal,
+  NativeReadInput,
+  NativeReadResult,
+  NativeResolutionInput,
+  NativeResource,
+  NativeSelectionInput,
+  NativeStatus,
+  NativeWorkflowError,
+  NativeWorkflowInput,
+  NativeWorkflowResult,
+} from "./native.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -492,6 +513,16 @@ export const WS_METHODS = {
 
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
+  localModels: "heiwa.local.models",
+  localConnect: "heiwa.local.connect",
+  nativeStatus: "heiwa.native.status",
+  nativeInventory: "heiwa.native.inventory",
+  nativeSelect: "heiwa.native.select",
+  nativeRead: "heiwa.native.read",
+  nativePropose: "heiwa.native.propose",
+  nativeApprove: "heiwa.native.approve",
+  nativeResolve: "heiwa.native.resolve",
+  nativeWorkflow: "heiwa.native.workflow",
   serverRefreshProviders: "server.refreshProviders",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
@@ -622,6 +653,57 @@ const WsServerProbeRpc = Rpc.make(WS_METHODS.serverProbe, {
   payload: Schema.Struct({}),
   success: Schema.Struct({}),
   error: EnvironmentAuthorizationError,
+});
+
+const WsLocalModelsRpc = Rpc.make(WS_METHODS.localModels, {
+  payload: LocalInferenceInput,
+  success: LocalInferenceInventory,
+  error: Schema.Union([LocalInferenceError, EnvironmentAuthorizationError]),
+});
+const WsLocalConnectRpc = Rpc.make(WS_METHODS.localConnect, {
+  payload: LocalInferenceInput,
+  success: LocalInferenceConnection,
+  error: Schema.Union([LocalInferenceError, EnvironmentAuthorizationError]),
+});
+const WsNativeStatusRpc = Rpc.make(WS_METHODS.nativeStatus, {
+  payload: Schema.Struct({}),
+  success: NativeStatus,
+  error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+});
+const WsNativeInventoryRpc = Rpc.make(WS_METHODS.nativeInventory, {
+  payload: NativeInventoryInput,
+  success: Schema.Array(NativeResource),
+  error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+});
+const WsNativeSelectRpc = Rpc.make(WS_METHODS.nativeSelect, {
+  payload: NativeSelectionInput,
+  success: NativeStatus,
+  error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+});
+const WsNativeReadRpc = Rpc.make(WS_METHODS.nativeRead, {
+  payload: NativeReadInput,
+  success: NativeReadResult,
+  error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+});
+const WsNativeProposeRpc = Rpc.make(WS_METHODS.nativePropose, {
+  payload: NativeAction,
+  success: NativeProposal,
+  error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+});
+const WsNativeResolveRpc = Rpc.make(WS_METHODS.nativeResolve, {
+  payload: NativeResolutionInput,
+  success: NativeProposal,
+  error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+});
+const WsNativeApproveRpc = Rpc.make(WS_METHODS.nativeApprove, {
+  payload: NativeApprovalInput,
+  success: NativeProposal,
+  error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+});
+const WsNativeWorkflowRpc = Rpc.make(WS_METHODS.nativeWorkflow, {
+  payload: NativeWorkflowInput,
+  success: NativeWorkflowResult,
+  error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
 });
 
 const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
@@ -1953,6 +2035,16 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 export const WsRpcGroup = RpcGroup.make(
   WsGuestShareCreateRpc,
   WsServerProbeRpc,
+  WsLocalModelsRpc,
+  WsLocalConnectRpc,
+  WsNativeStatusRpc,
+  WsNativeInventoryRpc,
+  WsNativeSelectRpc,
+  WsNativeReadRpc,
+  WsNativeProposeRpc,
+  WsNativeResolveRpc,
+  WsNativeApproveRpc,
+  WsNativeWorkflowRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,

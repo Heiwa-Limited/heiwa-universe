@@ -1,3 +1,5 @@
+import { LocalToolkit } from "./toolkits/local/tools.ts";
+import * as LocalHandlers from "./toolkits/local/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -78,6 +80,9 @@ import {
 import * as HtmlHandlers from "./toolkits/html/handlers.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
 
+import { NativeToolkit } from "./toolkits/native/tools.ts";
+import * as NativeHandlers from "./toolkits/native/handlers.ts";
+
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
   HttpServerRequest.toURL(request).pipe(
     Option.map((url) => `${url.origin}/.well-known/oauth-protected-resource/mcp`),
@@ -104,7 +109,7 @@ const unauthorized = (input: {
   return HttpServerResponse.jsonUnsafe(
     {
       error: "invalid_mcp_credential",
-      message: "A valid T3 Code MCP credential is required.",
+      message: "A valid Heiwa MCP credential is required.",
     },
     {
       status: 401,
@@ -1141,7 +1146,7 @@ export const layerDeviceToolkit = Layer.mergeAll(
 );
 
 export const layerMcpTransport = McpServer.layerHttp({
-  name: "T3 Code",
+  name: "Heiwa",
   version: packageJson.version,
   path: "/mcp",
   protocols: [McpProtocol.v2025_06_18],
@@ -1149,7 +1154,13 @@ export const layerMcpTransport = McpServer.layerHttp({
 }).pipe(Layer.provide(layerMcpAuthMiddleware));
 
 /** Every tool the T3 MCP server advertises. AgentContextBudget.test.ts measures this set. */
+export const layerLocalToolkit = toolkitRegistration(LocalToolkit, LocalHandlers.layer);
+
+export const layerNativeToolkit = toolkitRegistration(NativeToolkit, NativeHandlers.layer);
+
 export const layerTools = Layer.mergeAll(
+  layerLocalToolkit,
+  layerNativeToolkit,
   layerPreviewToolkit,
   layerOrchestratorToolkit,
   layerThreadToolkit,

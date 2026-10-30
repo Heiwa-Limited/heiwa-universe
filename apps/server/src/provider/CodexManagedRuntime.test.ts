@@ -97,7 +97,7 @@ it.live.each(
         const ambient = {
           CODEX_HOME: "/user/.codex",
           ACCESS_TOKEN: "ambient-bearer",
-          T3CODE_HOME: path.join(sharedHome, "wrong-server-home"),
+          HEIWA_HOME: path.join(sharedHome, "wrong-server-home"),
           OPENAI_API_KEY: "dummy-global-key",
           OPENAI_BASE_URL: "https://user-proxy.test",
           T3CODE_CODEX_LAUNCH_ARGS: "--config model_provider=global-proxy",
@@ -192,7 +192,7 @@ it.live.each(
             const refused = yield* runHelper;
             assert.equal(refused.code, 1);
             assert.equal(refused.stdout, "");
-            assert.isFalse(yield* fs.exists(ambient.T3CODE_HOME));
+            assert.isFalse(yield* fs.exists(ambient.HEIWA_HOME));
           }
           assert.include(args, "features.api_key_model_discovery=true");
           assert.include(args, "features.multi_agent=false");

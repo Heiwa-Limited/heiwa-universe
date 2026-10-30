@@ -59,6 +59,7 @@ export interface McpToolSessionOptions {
 }
 
 export interface McpToolSession {
+  readonly listTools?: () => Effect.Effect<unknown, AcpMcpBridgeError>;
   /** Resolves to the JSON-RPC `result` of `tools/call`, a `CallToolResult`. */
   readonly call: (
     tool: string,
@@ -67,8 +68,8 @@ export interface McpToolSession {
 }
 
 /**
- * One initialized MCP session over T3 Code's HTTP endpoint, terminated when
- * the scope closes. Used by the ACP terminal fallback and `t3 thread`.
+ * One initialized MCP session over Heiwa's HTTP endpoint, terminated when
+ * the scope closes. Used by the ACP terminal fallback and `heiwa thread`.
  */
 export const mcpToolSession = (
   options: McpToolSessionOptions,
@@ -102,7 +103,7 @@ export const mcpToolSession = (
     if (!response.ok) {
       yield* discardResponseBody(response);
       return yield* Effect.fail(
-        new AcpMcpBridgeError(`T3 Code MCP endpoint responded with HTTP ${response.status}.`),
+        new AcpMcpBridgeError(`Heiwa MCP endpoint responded with HTTP ${response.status}.`),
       );
     }
     const payloads = yield* Stream.runCollect(responsePayloads(response, bridgeError));
@@ -122,7 +123,7 @@ export const mcpToolSession = (
     if (envelope === null || envelope.error !== undefined) {
       return yield* Effect.fail(
         new AcpMcpBridgeError(
-          `T3 Code MCP ${method} failed${envelope?.error === undefined ? "." : `: ${JSON.stringify(envelope.error)}`}`,
+          `Heiwa MCP ${method} failed${envelope?.error === undefined ? "." : `: ${JSON.stringify(envelope.error)}`}`,
         ),
       );
     }
@@ -148,6 +149,7 @@ export const mcpToolSession = (
     });
     yield* send({ jsonrpc: "2.0", method: "notifications/initialized" });
     return {
+      listTools: () => request("tools/list", {}).pipe(Effect.map((envelope) => envelope.result)),
       call: (tool, args) =>
         request("tools/call", { name: tool, arguments: args }).pipe(
           Effect.map((envelope) => envelope.result),
@@ -230,7 +232,7 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
           if (envelope.id !== undefined) {
             yield* respondWithError(
               envelope.id,
-              `T3 Code MCP endpoint responded with HTTP ${response.status}.`,
+              `Heiwa MCP endpoint responded with HTTP ${response.status}.`,
             );
           }
           return yield* discardResponseBody(response);
@@ -244,7 +246,7 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
             const error = Cause.squash(cause);
             return respondWithError(
               envelope.id,
-              `T3 Code MCP bridge request failed: ${error instanceof Error ? error.message : String(error)}`,
+              `Heiwa MCP bridge request failed: ${error instanceof Error ? error.message : String(error)}`,
             );
           }),
         ),

@@ -1,14 +1,15 @@
 {
   "name": "t3",
-  "version": "0.1.5",
+  "version": "0.4.0-preview.20261030.1",
+  "private": true,
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pingdotgg/t3code",
+    "url": "https://github.com/Heiwa-Limited/heiwa-universe",
     "directory": "apps/server"
   },
   "bin": {
-    "t3": "./dist/bin.mjs"
+    "heiwa": "./dist/bin.mjs"
   },
   "files": [
     "dist"

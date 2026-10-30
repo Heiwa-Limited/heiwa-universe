@@ -88,6 +88,27 @@ const buildCmd = Command.make(
         }),
       );
 
+      if ((yield* HostProcess.Platform) === "darwin") {
+        const nativeDirectory = path.join(serverDir, "dist/native");
+        yield* fs.makeDirectory(nativeDirectory, { recursive: true });
+        yield* runCommand(
+          ChildProcess.make(
+            "xcrun",
+            [
+              "swiftc",
+              "-O",
+              "-parse-as-library",
+              path.join(repoRoot, "native/apple/HeiwaApple.swift"),
+              path.join(repoRoot, "native/apple/HeiwaFiles.swift"),
+              "-framework",
+              "EventKit",
+              "-o",
+              path.join(nativeDirectory, "heiwa-apple"),
+            ],
+            { stdout: "inherit", stderr: "inherit", shell: false },
+          ),
+        );
+      }
       const webDist = path.join(repoRoot, "apps/web/dist");
       const clientTarget = path.join(serverDir, "dist/client");
 

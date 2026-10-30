@@ -7,6 +7,9 @@ export type AcpRegistryDistributionPreference = typeof AcpRegistryDistributionPr
 
 export const AcpRegistrySettings = makeProviderSettingsSchema(
   {
+    provision: Schema.optionalKey(Schema.Literal("heiwa-local")).pipe(
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
     source: Schema.Literals(["registry", "local"]).pipe(
       Schema.withDecodingDefault(Effect.succeed("registry")),
       Schema.annotateKey({

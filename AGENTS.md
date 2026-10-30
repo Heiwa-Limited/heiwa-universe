@@ -1,3 +1,7 @@
+# Heiwa fork context
+
+Read HEIWA.md first. Devon's instructions govern this fork. The upstream guidance below describes the T3 foundation; upstream identity, cloud services and publication authority do not transfer to Heiwa. Preserve LICENSE and NOTICE.
+
 # T3 Code
 
 T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients.

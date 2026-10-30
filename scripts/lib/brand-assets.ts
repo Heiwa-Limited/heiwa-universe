@@ -5,30 +5,30 @@ export const BRAND_ASSET_PATHS = {
 
   productionIconComposerProject: "assets/prod/app-icon.icon",
   productionIosIconPng: "assets/prod/black-ios-1024.png",
-  productionMacIconPng: "assets/prod/black-macos-1024.png",
+  productionMacIconPng: "assets/heiwa/icon.png",
   productionLinuxIconPng: "assets/prod/black-universal-1024.png",
   productionWindowsIconIco: "assets/prod/t3-black-windows.ico",
-  productionWebFaviconIco: "assets/prod/t3-black-web-favicon.ico",
-  productionWebFavicon16Png: "assets/prod/t3-black-web-favicon-16x16.png",
-  productionWebFavicon32Png: "assets/prod/t3-black-web-favicon-32x32.png",
-  productionWebAppleTouchIconPng: "assets/prod/t3-black-web-apple-touch-180.png",
+  productionWebFaviconIco: "assets/heiwa/icon.png",
+  productionWebFavicon16Png: "assets/heiwa/icon.png",
+  productionWebFavicon32Png: "assets/heiwa/icon.png",
+  productionWebAppleTouchIconPng: "assets/heiwa/icon.png",
 
   nightlyIconComposerProject: "assets/nightly/app-icon.icon",
   nightlyIosIconPng: "assets/nightly/nightly-ios-1024.png",
-  nightlyMacIconPng: "assets/nightly/nightly-macos-1024.png",
+  nightlyMacIconPng: "assets/heiwa/icon.png",
   nightlyLinuxIconPng: "assets/nightly/nightly-universal-1024.png",
   nightlyWindowsIconIco: "assets/nightly/nightly-windows.ico",
-  nightlyWebFaviconIco: "assets/nightly/nightly-web-favicon.ico",
-  nightlyWebFavicon16Png: "assets/nightly/nightly-web-favicon-16x16.png",
-  nightlyWebFavicon32Png: "assets/nightly/nightly-web-favicon-32x32.png",
-  nightlyWebAppleTouchIconPng: "assets/nightly/nightly-web-apple-touch-180.png",
+  nightlyWebFaviconIco: "assets/heiwa/icon.png",
+  nightlyWebFavicon16Png: "assets/heiwa/icon.png",
+  nightlyWebFavicon32Png: "assets/heiwa/icon.png",
+  nightlyWebAppleTouchIconPng: "assets/heiwa/icon.png",
 
-  developmentDesktopIconPng: "assets/dev/blueprint-macos-1024.png",
+  developmentDesktopIconPng: "assets/heiwa/icon.png",
   developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
-  developmentWebFaviconIco: "assets/dev/blueprint-web-favicon.ico",
-  developmentWebFavicon16Png: "assets/dev/blueprint-web-favicon-16x16.png",
-  developmentWebFavicon32Png: "assets/dev/blueprint-web-favicon-32x32.png",
-  developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
+  developmentWebFaviconIco: "assets/heiwa/icon.png",
+  developmentWebFavicon16Png: "assets/heiwa/icon.png",
+  developmentWebFavicon32Png: "assets/heiwa/icon.png",
+  developmentWebAppleTouchIconPng: "assets/heiwa/icon.png",
 } as const;
 
 export type WebAssetBrand = "development" | "nightly" | "production";
@@ -47,7 +47,7 @@ export interface IconOverride {
 }
 
 const WEB_ICON_TARGET_FILENAMES = {
-  faviconIco: "favicon.ico",
+  faviconIco: "favicon.png",
   favicon16Png: "favicon-16x16.png",
   favicon32Png: "favicon-32x32.png",
   appleTouchIconPng: "apple-touch-icon.png",

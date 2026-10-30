@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/desktop",
-  "version": "0.1.5",
+  "version": "0.4.0-preview.20261030.1",
   "private": true,
   "type": "module",
   "main": "dist-electron/boot.cjs",
@@ -40,5 +40,5 @@
     "tailwindcss": "^4.0.0",
     "vite-plus": "catalog:"
   },
-  "productName": "T3 Code (Beta)"
+  "productName": "Heiwa"
 }

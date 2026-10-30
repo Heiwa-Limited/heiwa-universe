@@ -1,6 +1,6 @@
 /**
- * Every ACP agent spawns `t3 acp-mcp-bridge` while opening its session, and terminal-fallback
- * agents run `t3 acp-mcp-call` per tool call, so their startup sits on first-message latency.
+ * Every ACP agent spawns `heiwa acp-mcp-bridge` while opening its session, and terminal-fallback
+ * agents run `heiwa acp-mcp-call` per tool call, so their startup sits on first-message latency.
  * They and Codex's managed-token helper dispatch before the full CLI module graph (seconds
  * of evaluation) loads; everything else defers to the real CLI in ./binCli.ts.
  */
@@ -17,7 +17,10 @@ if (
   // Guard sockets before either dispatch path can load outbound-capable modules.
   const { ignoreMacosTypeOfServiceEinval } = await import("./outboundHttp.ts");
   ignoreMacosTypeOfServiceEinval();
-  if (command === "__document-text") {
+  if (command === "__ollama-acp") {
+    const { runOllamaAcp } = await import("./provider/local/OllamaAcp.ts");
+    await runOllamaAcp();
+  } else if (command === "__document-text") {
     const { extractDocumentText } = await import("./provider/documentTextWorker.ts");
     try {
       process.stdout.write(await extractDocumentText(process.argv[3]!, process.argv[4]!));

@@ -292,7 +292,11 @@ export function ProviderAuthenticationSection({
                   ? "Change account"
                   : auth?.phase === "failed" || auth?.phase === "cancelled"
                     ? "Retry sign-in"
-                    : "Sign in"}
+                    : provider.driver === "claudeAgent"
+                      ? "Sign in with Claude"
+                      : provider.driver === "antigravity"
+                        ? "Sign in with Google"
+                        : "Sign in"}
               </Button>
             ) : null}
             {!active && signedIn && (provider.auth.canLogout ?? provider.setup?.canAuthenticate) ? (

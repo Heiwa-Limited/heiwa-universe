@@ -8,6 +8,7 @@ import {
   setWindowsPath,
 } from "@t3tools/shared/shell";
 import * as Effect from "effect/Effect";
+import { PRODUCT_DATA_DIRECTORY } from "@t3tools/shared/product";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as NodeOS from "node:os";
@@ -123,7 +124,7 @@ export const expandHomePath = Effect.fn(function* (input: string) {
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
   const { join, resolve } = yield* Path.Path;
   if (!raw || raw.trim().length === 0) {
-    return join(yield* HostProcess.HomeDirectory, ".t3");
+    return join(yield* HostProcess.HomeDirectory, PRODUCT_DATA_DIRECTORY);
   }
   return resolve(yield* expandHomePath(raw.trim()));
 });

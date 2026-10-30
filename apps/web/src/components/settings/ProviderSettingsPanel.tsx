@@ -1,3 +1,5 @@
+import { isHeiwaLocalProvision } from "@t3tools/contracts";
+import { LocalInferenceSetup } from "./LocalInferenceSetup";
 import { SettingsGroup } from "./SettingsGroup";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import {
@@ -575,6 +577,7 @@ export function EnvironmentProviderSettings({
   });
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
+  const [connectionDriver, setConnectionDriver] = useState<ProviderDriverKind | undefined>();
   const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | null>(
     targetInstanceId ?? null,
   );
@@ -958,6 +961,38 @@ export function EnvironmentProviderSettings({
 
   return (
     <>
+      {!readOnly && projectIds.length === 0 ? (
+        <>
+          <section className="mb-6">
+            <h3 className="text-sm font-semibold">Connect your AI accounts</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Use the provider’s sign-in and available plan allowance. Model access and usage limits
+              are checked separately. Google connects through Antigravity; a Google login alone does
+              not include AI inference.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {[
+                ["codex", "ChatGPT"],
+                ["claudeAgent", "Claude"],
+                ["antigravity", "Google"],
+              ].map(([driver, label]) => (
+                <Button
+                  key={driver}
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setConnectionDriver(ProviderDriverKind.make(driver!));
+                    setIsAddInstanceDialogOpen(true);
+                  }}
+                >
+                  Sign in with {label}
+                </Button>
+              ))}
+            </div>
+          </section>
+          <LocalInferenceSetup environmentId={environmentId} />
+        </>
+      ) : null}
       <SettingsSection
         {...searchableSetting("providers")}
         variant="plain"
@@ -969,7 +1004,10 @@ export function EnvironmentProviderSettings({
                   <Button
                     size="icon-xs"
                     variant="ghost-muted"
-                    onClick={() => setIsAddInstanceDialogOpen(true)}
+                    onClick={() => {
+                      setConnectionDriver(undefined);
+                      setIsAddInstanceDialogOpen(true);
+                    }}
                     aria-label="Add provider"
                   >
                     <PlusIcon />
@@ -1041,7 +1079,10 @@ export function EnvironmentProviderSettings({
                   <button
                     type="button"
                     className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left text-sm text-muted-foreground transition-colors outline-none hover:bg-muted/25 hover:text-foreground focus-visible:bg-muted/25 focus-visible:text-foreground sm:px-4"
-                    onClick={() => setIsAddInstanceDialogOpen(true)}
+                    onClick={() => {
+                      setConnectionDriver(undefined);
+                      setIsAddInstanceDialogOpen(true);
+                    }}
                   >
                     <PlusIcon className="size-4 shrink-0" />
                     Add provider
@@ -1163,6 +1204,8 @@ export function EnvironmentProviderSettings({
           environmentLabel={environmentLabel}
           onOpenChange={setIsAddInstanceDialogOpen}
           onCreated={setSelectedInstanceId}
+          {...(connectionDriver ? { initialDriver: connectionDriver } : {})}
+          startChatGpt={connectionDriver === "codex"}
         />
       ) : null}
     </>
@@ -1312,7 +1355,12 @@ function ProviderInstanceRow({
       }
       canWriteSettings={canWriteSettings}
       setup={
-        mode === "editor" && driver === "antigravity" ? (
+        mode === "editor" && isHeiwaLocalProvision(instance.config) ? (
+          <SettingsRow
+            title="Local computation"
+            description="No provider account is needed. File and process tools use the chat workspace. Apple changes follow the resources and routine-change setting you choose in Apple apps settings."
+          />
+        ) : mode === "editor" && driver === "antigravity" ? (
           <ProviderSetupSection
             environmentId={environmentId}
             environmentLabel={environmentLabel}

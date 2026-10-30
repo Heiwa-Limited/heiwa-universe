@@ -132,7 +132,7 @@ it.effect("offers a Scratch folder when Git is not installed", () =>
     ({ baseDir }) =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
-        assert.equal(yield* requireRoot, path.resolve(baseDir, "scratch"));
+        assert.equal(yield* requireRoot, path.resolve(baseDir, "workspaces", "personal"));
       }),
     {
       vcsProcess: Layer.succeed(VcsProcess.VcsProcess, {
@@ -174,7 +174,7 @@ it.effect("creates one Scratch project, even for concurrent first requests", () 
       const root = yield* requireRoot;
       const scratchProjects = snapshot.projects.filter((project) => project.workspaceRoot === root);
       assert.lengthOf(scratchProjects, 1);
-      assert.equal(scratchProjects[0]?.title, "No project");
+      assert.equal(scratchProjects[0]?.title, "Personal");
       assert.deepEqual(scratchProjects[0]?.projectIcon, {
         kind: "lucide",
         name: "message-square-dashed",

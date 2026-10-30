@@ -1,3 +1,10 @@
+import * as LocalProvision from "./provider/local/LocalProvision.ts";
+import * as NativeWorkflows from "./native/NativeWorkflows.ts";
+import {
+  AuthSettingsWriteScope,
+  AuthOrchestrationReadScope,
+  AuthProvidersManageScope,
+} from "@t3tools/contracts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -1372,6 +1379,8 @@ export const layerWsRpc = (
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const triage = yield* TriageService.TriageService;
+      const localProvision = yield* LocalProvision.LocalProvision;
+      const nativeWorkflows = yield* NativeWorkflows.NativeWorkflows;
       const hostResources = yield* HostResources.HostResources;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
@@ -2175,6 +2184,32 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(
             Effect.andThen(scheduledTasks.getWebhookDelivery(input)),
           ),
+        [WS_METHODS.localModels]: (input) =>
+          authorizeEffect(AuthProvidersManageScope, localProvision.inventory(input)),
+        [WS_METHODS.localConnect]: (input) =>
+          authorizeEffect(AuthProvidersManageScope, localProvision.connect(input)),
+        [WS_METHODS.nativeStatus]: () =>
+          authorizeEffect(AuthSettingsWriteScope, nativeWorkflows.status),
+        [WS_METHODS.nativeInventory]: (input) =>
+          authorizeEffect(
+            AuthSettingsWriteScope,
+            nativeWorkflows.inventory(input.app, input.requestAccess),
+          ),
+        [WS_METHODS.nativeSelect]: (input) =>
+          authorizeEffect(
+            AuthSettingsWriteScope,
+            nativeWorkflows.select(input.app, input.resourceIds, input.writeMode),
+          ),
+        [WS_METHODS.nativeRead]: (input) =>
+          authorizeEffect(AuthOrchestrationReadScope, nativeWorkflows.read(input)),
+        [WS_METHODS.nativePropose]: (input) =>
+          authorizeEffect(AuthOrchestrationOperateScope, nativeWorkflows.propose(input)),
+        [WS_METHODS.nativeResolve]: (input) =>
+          authorizeEffect(AuthSettingsWriteScope, nativeWorkflows.resolve(input.id, input.note)),
+        [WS_METHODS.nativeApprove]: (input) =>
+          authorizeEffect(AuthSettingsWriteScope, nativeWorkflows.approve(input.id, input.approve)),
+        [WS_METHODS.nativeWorkflow]: (input) =>
+          authorizeEffect(AuthOrchestrationReadScope, nativeWorkflows.run(input)),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: (_input) =>
           loadServerConfig({ usageLimitsCommand: false, workspaceSnapshotsOnDemand: false }),

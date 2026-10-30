@@ -1,3 +1,6 @@
+import * as LocalProvision from "./provider/local/LocalProvision.ts";
+import * as NativeWorkflows from "./native/NativeWorkflows.ts";
+import * as NativeHost from "./native/NativeHost.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Random from "effect/Random";
@@ -696,6 +699,8 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
 );
 
 const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
+  Layer.provideMerge(LocalProvision.layer),
+  Layer.provideMerge(NativeWorkflows.layer.pipe(Layer.provide(NativeHost.layer))),
   Layer.provideMerge(layerUsage),
   Layer.provideMerge(layerBackground),
   Layer.provideMerge(layerResourceDiagnostics),

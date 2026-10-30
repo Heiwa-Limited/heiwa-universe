@@ -1,3 +1,4 @@
+import { isHeiwaLocalProvision } from "@t3tools/contracts";
 import { Spinner } from "~/components/ui/spinner";
 
 import {
@@ -701,6 +702,7 @@ export function ProviderInstanceCard({
   secretSources = NO_SECRET_SOURCES,
   projectOverride,
 }: ProviderInstanceCardProps) {
+  const heiwaLocal = isHeiwaLocalProvision(instance.config);
   const enabled = projectOverride?.effectiveEnabled ?? resolveProviderInstanceEnabled(instance);
   const effectiveProvider = liveProvider && { ...liveProvider, enabled };
   const compatibility = enabled ? liveProvider?.compatibilityAdvisory : undefined;
@@ -1271,7 +1273,21 @@ export function ProviderInstanceCard({
         </SettingsSection>
       ) : null}
 
-      {instance.driver === "codex" && readCodexSetupMode(instance.config) === "managed" ? (
+      {heiwaLocal ? (
+        <SettingsSection title="Local inference">
+          <SettingsRow
+            title="Ollama endpoint"
+            description={String(
+              instance.environment?.find((variable) => variable.name === "HEIWA_LOCAL_ENDPOINT")
+                ?.value ?? "http://127.0.0.1:11434",
+            )}
+          />
+          <SettingsRow
+            title="Workspaces and tools"
+            description="Heiwa manages this worker. File and process actions stay within the chat workspace; sandboxed commands cannot access the network."
+          />
+        </SettingsSection>
+      ) : instance.driver === "codex" && readCodexSetupMode(instance.config) === "managed" ? (
         <div
           inert={readOnly}
           aria-disabled={readOnly || undefined}
@@ -1297,19 +1313,21 @@ export function ProviderInstanceCard({
         </SettingsSection>
       ) : null}
 
-      <SettingsSection
-        title="Environment"
-        inert={readOnly}
-        aria-disabled={readOnly || undefined}
-        className={readOnly ? "opacity-50 select-none" : undefined}
-      >
-        <ProviderEnvironmentSection
-          environment={genericEnvironment}
-          onChange={updateGenericEnvironment}
-          secretSources={secretSources}
-        />
-      </SettingsSection>
-      {environmentId !== undefined && liveProvider?.driver === "acpRegistry" ? (
+      {!heiwaLocal ? (
+        <SettingsSection
+          title="Environment"
+          inert={readOnly}
+          aria-disabled={readOnly || undefined}
+          className={readOnly ? "opacity-50 select-none" : undefined}
+        >
+          <ProviderEnvironmentSection
+            environment={genericEnvironment}
+            onChange={updateGenericEnvironment}
+            secretSources={secretSources}
+          />
+        </SettingsSection>
+      ) : null}
+      {!heiwaLocal && environmentId !== undefined && liveProvider?.driver === "acpRegistry" ? (
         <AcpSessionManagementSection
           environmentId={environmentId}
           instanceId={instanceId}
