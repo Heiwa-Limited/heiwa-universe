@@ -4,7 +4,7 @@ use crate::cmd;
 
 pub async fn try_handle(args: &[String]) -> Result<bool> {
     match args.get(1).map(String::as_str) {
-        Some("auth") if args.get(2).map(String::as_str) == Some("verify-codex") => {
+        Some("auth") if args.get(2).is_some_and(|command| command == "verify-codex") => {
             verify_codex(&args[3..]).await?;
             Ok(true)
         }
