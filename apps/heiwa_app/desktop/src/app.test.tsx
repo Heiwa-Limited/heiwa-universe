@@ -787,6 +787,32 @@ describe("operator seam", () => {
     expect(runtimePost).toHaveBeenCalledWith("/api/v1/reminders/select", { list_ids: ["l1"] });
   });
 
+  it("offers Reminders reconnection after an enrolled profile loses native read access", async () => {
+    let authorized = false;
+    const get = async (path: string) => {
+      if (path === "/api/v1/reminders/status") return { data: { status: "connected", selected_list_ids: ["l1"] } };
+      if (path === "/api/v1/reminders/lists") {
+        if (!authorized) throw new Error("Native read unavailable");
+        return { data: { complete: true, lists: [{ id: "l1", name: "Errands", source: "iCloud", writable: true }] } };
+      }
+      if (path === "/api/v1/reminders") return { data: { complete: true, reminders: [
+        { id: "r1", list_id: "l1", title: "Recovered task", due: null, completed: false },
+      ] } };
+      return { data: {} };
+    };
+    const { state, runtimePost } = harness({ get });
+    runtimePost.mockImplementation(async (path: string) => {
+      if (path === "/api/v1/connectors/apple_reminders/connect") authorized = true;
+      return { ok: true, data: {} };
+    });
+    state.navigate("reminders");
+    render(() => <App state={state} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reconnect Apple Reminders" }));
+    expect(await screen.findByText("Recovered task")).toBeTruthy();
+    expect(runtimePost).toHaveBeenCalledWith("/api/v1/connectors/apple_reminders/connect", {});
+    expect(runtimePost).not.toHaveBeenCalledWith("/api/v1/reminders/select", expect.anything());
+  });
+
   it("reports why an explicit Mail read returned nothing instead of a zero count", async () => {
     // Found on a fresh public install: a timed-out read printed
     // "Read 0 headers; 0 added" as if Mail were simply empty.

@@ -232,6 +232,14 @@ export function createRuntimeState(options: RuntimeStateOptions = {}): RuntimeSt
     } catch {
       // Keep the last known connection. Dropping to null on a transient
       // failure flips a connected calendar back to "Checking…" and hides it.
+      // On first load there is no prior value: finish the check with an
+      // actionable state instead of leaving a disabled connection forever.
+      if (request === resourcesRequest && calendarResources() === null) {
+        setCalendarResources({
+          source: "apple_calendar", status: "unavailable", calendars: [],
+          detail: "The Calendar connection could not be checked. Try again.",
+        });
+      }
     }
   }
 

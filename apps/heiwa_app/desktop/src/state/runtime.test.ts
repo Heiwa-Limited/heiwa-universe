@@ -5,6 +5,19 @@ import { createRuntimeState } from "./runtime";
 describe("RuntimeState calendar", () => {
   const september = { from: "2026-08-30", to: "2026-10-10" };
 
+  it("finishes a failed initial connection check and can retry without authorizing", async () => {
+    const get = vi.fn().mockRejectedValueOnce(new Error("private native detail"))
+      .mockResolvedValueOnce({ data: { source: "apple_calendar", status: "ready", calendars: [] } });
+    const post = vi.fn();
+    const state = createRuntimeState({ get, post });
+    await state.loadCalendarResources();
+    expect(state.calendarResources()).toMatchObject({ status: "unavailable" });
+    expect(JSON.stringify(state.calendarResources())).not.toContain("private native detail");
+    await state.loadCalendarResources();
+    expect(state.calendarResources()?.status).toBe("ready");
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("loads a local-day range and refreshes that same range later", async () => {
     const get = vi.fn().mockResolvedValue({
       data: { events: [{ id: "a", title: "A", date: "2026-09-14" }], sync: { status: "fresh", complete: true } },

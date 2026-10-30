@@ -66,6 +66,31 @@ const week = (): CalendarEvent[] => [
   { id: "october", title: "October review", source: "apple_calendar", calendar: "Work", start: local(2, 10, 0, 9).toISOString(), end: local(2, 11, 0, 9).toISOString() },
 ];
 
+it("offers a read-only retry when the first Calendar connection check fails", async () => {
+  let calls = 0;
+  const post = vi.fn();
+  mount({ post, get: (path) => {
+    if (!path.endsWith("/resources")) return { data: {} };
+    if (++calls === 1) throw new Error("private runtime detail");
+    return { data: { source: "apple_calendar", status: "disconnected", calendars: [], detail: "Connect Calendar" } };
+  } });
+  fireEvent.click(await screen.findByRole("button", { name: "Retry Calendar check" }));
+  expect(await screen.findByRole("button", { name: "Connect Apple Calendar" })).toBeTruthy();
+  expect(screen.queryByText("private runtime detail")).toBeNull();
+  expect(post).not.toHaveBeenCalled();
+});
+
+it("can restore enrolled Calendar access without disconnecting or replacing selected calendars", async () => {
+  const post = vi.fn().mockResolvedValue({ data: { status: "fresh" } });
+  mount({ post, resources: { source: "apple_calendar", status: "ready", reader_available: false,
+    selected_ids: ["work"], calendars: [], detail: "Calendar read access unavailable" } });
+  fireEvent.click(await screen.findByRole("button", { name: "Reconnect Apple Calendar" }));
+  await waitFor(() => expect(post).toHaveBeenCalledWith("/api/v1/connectors/apple_calendar/connect", {}));
+  await waitFor(() => expect(post).toHaveBeenCalledWith("/api/v1/calendar/sync", { force: true, max_age_seconds: 120 }));
+  expect(post).not.toHaveBeenCalledWith("/api/v1/connectors/apple_calendar/disconnect", expect.anything());
+  expect(post).not.toHaveBeenCalledWith("/api/v1/calendar/select", expect.anything());
+});
+
 it("persists nonadjacent choices without importing and retains rows across resource replacement", async () => {
   let saved: string[] = [];
   const calendars = ["Work", "Family", "Life", "Health"].map((name) => ({ id: name.toLowerCase(), name, writable: true }));

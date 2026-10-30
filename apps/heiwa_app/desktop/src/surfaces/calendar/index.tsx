@@ -447,8 +447,12 @@ function ConnectionPanel() {
     setBusy(true);
     setError(null);
     try {
-      await app.runtime.connectAppleCalendar();
-      await app.runtime.syncCalendar({ force: true });
+      if (app.runtime.calendarResources()?.status === "unavailable") {
+        await app.runtime.loadCalendarResources();
+      } else {
+        await app.runtime.connectAppleCalendar();
+        await app.runtime.syncCalendar({ force: true });
+      }
     } catch (cause) {
       setError(runtimeErrorMessage(cause, "Apple Calendar could not be connected. Try again."));
     } finally {
@@ -469,7 +473,7 @@ function ConnectionPanel() {
         disabled={busy() || app.runtime.calendarResources() === null}
         onClick={() => void connect()}
       >
-        Connect Apple Calendar
+        {app.runtime.calendarResources()?.status === "unavailable" ? "Retry Calendar check" : "Connect Apple Calendar"}
       </button>
       <Show when={error()}>{(message) => <p class="surface-error" role="alert">{message()}</p>}</Show>
     </section>
@@ -482,6 +486,7 @@ function CalendarSettings() {
   const [notice, setNotice] = createSignal<string | null>(null);
   const [error, setError] = createSignal<string | null>(null);
   const [disconnecting, setDisconnecting] = createSignal(false);
+  const [reconnecting, setReconnecting] = createSignal(false);
   const saved = () => app.runtime.calendarResources()?.selected_ids ?? [];
   const pending = app.runtime.calendarSelection;
   const selectedIds = () => pending()?.ids ?? saved();
@@ -509,6 +514,20 @@ function CalendarSettings() {
     const ids = [...selectedIds()];
     await app.runtime.loadCalendarResources();
     await app.runtime.selectAppleCalendars(ids);
+  }
+
+  async function reconnect(): Promise<void> {
+    if (reconnecting() || readBusy() || pending()?.saving) return;
+    setReconnecting(true);
+    setError(null);
+    try {
+      await app.runtime.connectAppleCalendar();
+      await app.runtime.syncCalendar({ force: true });
+    } catch (cause) {
+      setError(runtimeErrorMessage(cause, "Calendar access could not be restored. Check System Settings › Privacy & Security › Calendars."));
+    } finally {
+      setReconnecting(false);
+    }
   }
 
   async function syncSelected(): Promise<void> {
@@ -590,7 +609,10 @@ function CalendarSettings() {
       <Show when={notice()}><p class="quiet" role="status">{notice()}</p></Show>
       <Show when={error()}>{(message) => <p class="surface-error" role="alert">{message()}</p>}</Show>
       <div class="cal-settings-footer">
-        <button class="small-action" disabled={disconnecting() || readBusy() || pending()?.saving} onClick={() => void disconnect()}>
+        <button class="small-action" disabled={disconnecting() || reconnecting() || readBusy() || pending()?.saving} onClick={() => void reconnect()}>
+          {reconnecting() ? "Checking access…" : "Reconnect Apple Calendar"}
+        </button>
+        <button class="small-action" disabled={disconnecting() || reconnecting() || readBusy() || pending()?.saving} onClick={() => void disconnect()}>
           Disconnect Apple Calendar
         </button>
       </div>
