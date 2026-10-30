@@ -265,6 +265,7 @@ async fn sync(args: &[String]) -> Result<()> {
     }
 
     let mut fetched: Vec<Value> = Vec::new();
+    let mut apple_fetched = 0usize;
     let mut source_reports: Vec<Value> = Vec::new();
 
     if source == "all" || source == "apple" || source == "apple_calendar" {
@@ -280,24 +281,30 @@ async fn sync(args: &[String]) -> Result<()> {
                 "reason": connection.get("detail").cloned().unwrap_or(Value::Null),
                 "next_action": connection.get("next_action").cloned().unwrap_or(Value::Null),
             }));
-        } else if calendar_app_present() {
-            match scan_apple_calendar(limit, days) {
-                Ok(rows) => {
+        } else {
+            // Use the same selected, bounded reader as the desktop and tools.
+            // It reconciles the snapshot itself; never append its rows twice.
+            match super::calendar_read::sync_selected(super::calendar_read::SyncRequest {
+                force: true,
+                max_age_seconds: None,
+            }) {
+                Ok(read) => {
+                    apple_fetched = if read["status"] == "synced" {
+                        read["fetched"].as_u64().unwrap_or(0) as usize
+                    } else {
+                        0
+                    };
                     source_reports.push(json!({
-                        "source": "apple", "status": "scanned", "fetched": rows.len(),
-                        "bridge": "Calendar.app JXA metadata bridge",
+                        "source": "apple", "status": read["status"], "fetched":apple_fetched,
+                        "bridge": "EventKit selected calendars", "read":read,
+                        "sync_semantics":"saved selection and the native reader's fixed window; --limit/--days apply to Google",
                     }));
-                    fetched.extend(rows);
                 }
                 Err(error) => source_reports.push(json!({
                     "source": "apple", "status": "error", "error": error.to_string(),
-                    "bridge": "Calendar.app JXA metadata bridge",
+                    "bridge": "EventKit selected calendars",
                 })),
             }
-        } else {
-            source_reports.push(json!({
-                "source": "apple", "status": "skipped", "reason": "Calendar.app not present",
-            }));
         }
     }
 
@@ -326,12 +333,14 @@ async fn sync(args: &[String]) -> Result<()> {
     }
 
     let appended = append_event_rows(&fetched)?;
-    let receipt = write_sync_receipt(&source_reports, fetched.len(), appended)?;
+    let total_fetched = fetched.len().saturating_add(apple_fetched);
+    let receipt = write_sync_receipt(&source_reports, total_fetched, appended)?;
     let payload = json!({
         "command": "calendar sync",
         "policy": SYNC_POLICY,
         "sources": source_reports,
-        "fetched": fetched.len(),
+        "fetched": total_fetched,
+        "apple_projection":"reconciled by selected EventKit reader; appended/deduplicated count append imports only",
         "appended": appended,
         "deduplicated": fetched.len().saturating_sub(appended),
         "snapshot": events_snapshot_path().display().to_string(),
@@ -341,7 +350,7 @@ async fn sync(args: &[String]) -> Result<()> {
         println!("{payload}");
     } else {
         println!("calendar sync");
-        println!("  fetched: {}", fetched.len());
+        println!("  fetched: {total_fetched}");
         println!("  appended: {appended}");
         for report in payload["sources"].as_array().unwrap_or(&Vec::new()) {
             let source = report.get("source").and_then(Value::as_str).unwrap_or("?");
@@ -372,12 +381,13 @@ fn calendar_sync_dry_run_payload(source: &str, limit: usize, days: i64) -> Value
         "sources": {
             "apple": {
                 "selected": apple_selected,
-                "ready": apple_connection_status == "connected" && calendar_app_present(),
+                "ready": apple_connection_status == "connected" && super::calendar_read::helper_path().is_some() && super::calendar_read::selected_ids().is_ok_and(|ids| !ids.is_empty()),
                 "status": apple_connection_status,
                 "blocker": if apple_connection_status == "connected" { Value::Null } else {
                     apple_connection.get("detail").cloned().unwrap_or(Value::Null)
                 },
-                "bridge": "Calendar.app JXA metadata bridge",
+                "bridge": "EventKit selected calendars",
+                "selection_scope":"saved calendar IDs only; native reader's fixed window",
                 "fields": ["calendar", "title", "start", "end", "date", "status"],
                 "external_writes": "approval_required",
             },
@@ -394,10 +404,6 @@ fn calendar_sync_dry_run_payload(source: &str, limit: usize, days: i64) -> Value
     })
 }
 
-fn calendar_app_present() -> bool {
-    crate::cmd::calendar_apple::bridge_available()
-}
-
 fn local_timezone_name() -> String {
     fs::read_link("/etc/localtime")
         .ok()
@@ -406,72 +412,6 @@ fn local_timezone_name() -> String {
             path.split("zoneinfo/").nth(1).map(str::to_string)
         })
         .unwrap_or_else(|| "local".to_string())
-}
-
-const APPLE_CALENDAR_JXA: &str = r#"
-function run(argv) {
-  const limit = parseInt(argv[0] || "50", 10);
-  const startWindow = new Date(argv[1]);
-  const endWindow = new Date(argv[2]);
-  const Calendar = Application("Calendar");
-  const rows = [];
-  let calendars = [];
-  try { calendars = Calendar.calendars(); } catch (e) { return ""; }
-  for (let c = 0; c < calendars.length && rows.length < limit; c++) {
-    let calendarName = "Calendar";
-    let events = [];
-    try { calendarName = String(calendars[c].name()); } catch (e) {}
-    try { events = calendars[c].events(); } catch (e) { continue; }
-    for (let i = 0; i < events.length && rows.length < limit; i++) {
-      try {
-        const event = events[i];
-        const start = event.startDate();
-        const end = event.endDate();
-        if (!start || start < startWindow || start > endWindow) continue;
-        let externalId = "";
-        try { externalId = String(event.uid()); } catch (e) {}
-        rows.push(JSON.stringify({
-          source: "apple_calendar",
-          calendar: calendarName,
-          title: String(event.summary()),
-          start: start.toISOString(),
-          end: end ? end.toISOString() : null,
-          date: start.toISOString().slice(0, 10),
-          status: "confirmed",
-          external_id: externalId,
-        }));
-      } catch (e) {}
-    }
-  }
-  return rows.join("\n");
-}
-"#;
-
-fn scan_apple_calendar(limit: usize, days: i64) -> Result<Vec<Value>> {
-    use anyhow::Context;
-    let start = Utc::now();
-    let end = start + Duration::days(days);
-    let output = std::process::Command::new("osascript")
-        .arg("-l")
-        .arg("JavaScript")
-        .arg("-e")
-        .arg(APPLE_CALENDAR_JXA)
-        .arg(limit.to_string())
-        .arg(start.to_rfc3339())
-        .arg(end.to_rfc3339())
-        .output()
-        .context("failed to run osascript for Apple Calendar sync")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "Apple Calendar sync failed (Automation permission?): {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
-        .map(ensure_event_identity)
-        .collect())
 }
 
 async fn sync_google_calendar(limit: usize, days: i64) -> Result<(Vec<Value>, Vec<Value>)> {
@@ -1879,6 +1819,7 @@ fn print_help() {
     println!("Usage:");
     println!("  heiwa calendar status [--json]");
     println!("  heiwa calendar sync [--source all|apple|google] [--dry-run] [--json]");
+    println!("    Apple uses saved calendar selection and the native read window. --limit/--days apply to Google.");
     println!("  heiwa calendar hold add <title> [--date YYYY-MM-DD] [--start HH:MM] [--end HH:MM] [--kind focus|travel|soft] [--note <text>]");
     println!("  heiwa calendar hold list [--json]");
     println!("  heiwa calendar plan diff|stage <plan.json> [--adopt] [--json]");

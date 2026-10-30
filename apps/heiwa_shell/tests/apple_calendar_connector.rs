@@ -483,6 +483,46 @@ fn listing_resources_before_enrollment_is_empty_and_does_not_probe_calendar_app(
 }
 
 #[test]
+fn sync_with_no_saved_selection_does_not_fall_back_to_apple_script_or_all_calendars() {
+    let fixture = Fixture::new();
+    fixture.connect_apple_calendar_cli();
+    let previous = fs::read(&fixture.log).unwrap_or_default();
+    let bin = fixture.home.join("test-bin");
+    fs::create_dir_all(&bin).unwrap();
+    let marker = fixture.home.join("unexpected-script-call");
+    let script = bin.join("osascript");
+    fs::write(
+        &script,
+        "#!/bin/sh\nprintf unexpected > \"$HEIWA_UNEXPECTED_SCRIPT_MARKER\"\nexit 98\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let result = fixture
+        .heiwa()
+        .env("PATH", &bin)
+        .env("HEIWA_UNEXPECTED_SCRIPT_MARKER", &marker)
+        .args(["calendar", "sync", "--source", "apple", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(value["sources"][0]["status"], "no_selection");
+    assert!(
+        !marker.exists(),
+        "must not invoke the legacy unselected scan"
+    );
+    assert_eq!(fs::read(&fixture.log).unwrap_or_default(), previous);
+}
+
+#[test]
 fn reconnect_refuses_to_overwrite_a_future_enrollment_schema() {
     let fixture = Fixture::new();
     fixture.establish_local_identity();

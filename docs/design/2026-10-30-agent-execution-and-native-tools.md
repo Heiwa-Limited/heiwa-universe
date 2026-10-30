@@ -119,6 +119,11 @@ with proprietary desktop assistants and their tools.
 
 ## Verification and limits
 
+The CLI sweep found and removed a second, unbounded Apple Calendar script
+scanner. `calendar sync` now uses the same saved selection, bounded EventKit
+reader, and reconciliation as the desktop. Missing selection never falls back
+to all calendars. Google retains its separate limit/days import parameters.
+
 Regressions cover the public admitted adapter (including host-tool forwarding),
 role/history transport, duplicate call IDs, failed/incomplete/malformed streams,
 provider-native action rejection, cancellation of launcher descendants, multi-
