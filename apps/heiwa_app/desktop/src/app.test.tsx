@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./app";
 import { localIsoDate } from "./lib/format";
 import { AppProvider, createAppState, type AppState } from "./state/app";
@@ -9,7 +9,18 @@ import { SURFACES } from "./surfaces/registry";
 import type { OperatorFrame } from "./operator/types";
 import { MachinePerspective } from "./surfaces/home/MachinePerspective";
 
-afterEach(cleanup);
+beforeEach(() => {
+  // Node's experimental localStorage shadows jsdom's browser storage in
+  // this runner. Give each app test an isolated browser storage contract.
+  const data = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => { data.set(key, String(value)); },
+    removeItem: (key: string) => { data.delete(key); },
+    clear: () => data.clear(),
+  });
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const EMPTY_HISTORY = {
   ok: true,
@@ -365,6 +376,22 @@ describe("shell", () => {
     render(() => <App state={state} />);
     const labels = [...document.querySelectorAll<HTMLButtonElement>(".sidebar-navlist button")].map((button) => button.textContent);
     expect(labels).toEqual(["Home", "All sessions", "Work", "Calendar", "Mail", "Reminders", "Files"]);
+  });
+
+  it("preserves an on-device inference choice when the app remounts", () => {
+    const key = "heiwa.inference-channel.v1";
+    const previous = window.localStorage.getItem(key);
+    try {
+      window.localStorage.removeItem(key);
+      const { state } = harness();
+      render(() => <App state={state} />);
+      fireEvent.change(screen.getByLabelText("Inference channel"), { target: { value: "local" } });
+      cleanup();
+      render(() => <App state={state} />);
+      expect((screen.getByLabelText("Inference channel") as HTMLSelectElement).value).toBe("local");
+    } finally {
+      if (previous === null) window.localStorage.removeItem(key); else window.localStorage.setItem(key, previous);
+    }
   });
 
   it.each(SURFACES.map((surface) => surface.id))("mounts the %s surface", (id) => {

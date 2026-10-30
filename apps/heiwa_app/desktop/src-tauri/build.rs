@@ -25,6 +25,7 @@ const COMMANDS: &[&str] = &[
     "open_resource_guide",
     "connect_api_provider",
     "connect_codex_subscription",
+    "select_workspace_folder",
     "verify_api_provider",
     "disconnect_api_provider",
     "operator_subscribe",

@@ -36,6 +36,15 @@ automation flows do not inherit owner native-tool grants. Tool availability does
 not establish macOS permission; native enrollment and saved resource selections
 remain separate requirements.
 
+The desktop folder dialog belongs to Heiwa's own process through the official
+Tauri dialog plugin. Only the native command receives its selected path; the
+webview supplies a conversation ID, never an arbitrary grant path. The matching
+bundled CLI validates and atomically saves the same installation/device grant.
+The generic authenticated write proxy cannot grant a folder. Inference choice
+survives relaunch; unreadable or invalid preference storage falls back to the
+on-device policy. Native helper discovery resolves a CLI symlink before locating
+its matching resource binary.
+
 Mutating model tools use the operator approval surface, even when the runtime
 was launched from a CLI. The trusted, explicit `heiwa tools run` command retains
 the established owner-CLI policy. Unknown tool effects default to high risk.

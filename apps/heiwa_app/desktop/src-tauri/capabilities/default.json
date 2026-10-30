@@ -23,6 +23,7 @@
     "allow-open-resource-guide",
     "allow-connect-api-provider",
     "allow-connect-codex-subscription",
+    "allow-select-workspace-folder",
     "allow-verify-api-provider",
     "allow-disconnect-api-provider",
     "allow-operator-subscribe",

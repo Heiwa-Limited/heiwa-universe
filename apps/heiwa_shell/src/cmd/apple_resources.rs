@@ -56,11 +56,36 @@ pub(crate) fn helper_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("HEIWA_APPLE_RESOURCES_HELPER").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(path));
     }
-    std::env::current_exe()
+    helper_beside_executable(&std::env::current_exe().ok()?)
+}
+
+fn helper_beside_executable(executable: &Path) -> Option<PathBuf> {
+    // macOS may retain the ~/.local/bin entry-point symlink in current_exe.
+    // Resources belong beside its target, not beside the convenience link.
+    executable
+        .canonicalize()
         .ok()?
         .parent()
         .map(|dir| dir.join("heiwa-apple-resources"))
         .filter(|path| path.is_file())
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn native_helper_is_resolved_beside_the_target_of_a_cli_symlink() {
+    let root = tempfile::tempdir().unwrap();
+    let runtime = root.path().join("runtime/bin");
+    let entry = root.path().join("local/bin");
+    std::fs::create_dir_all(&runtime).unwrap();
+    std::fs::create_dir_all(&entry).unwrap();
+    std::fs::write(runtime.join("heiwa"), b"fixture").unwrap();
+    let helper = runtime.join("heiwa-apple-resources");
+    std::fs::write(&helper, b"fixture").unwrap();
+    std::os::unix::fs::symlink(runtime.join("heiwa"), entry.join("heiwa")).unwrap();
+    assert_eq!(
+        helper_beside_executable(&entry.join("heiwa")),
+        Some(helper.canonicalize().unwrap())
+    );
 }
 
 /// One bounded request to the EventKit helper over stdin.

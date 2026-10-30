@@ -52,6 +52,13 @@ pub(crate) fn probe_local_app(port: u16) -> LocalAppProbe {
 
 pub async fn run(args: &[String]) -> Result<()> {
     match args.first().map(String::as_str) {
+        Some("grant-workspace") => {
+            if args.len() != 4 || args[3] != "--json" {
+                bail!("usage: heiwa app grant-workspace <thread-id> <folder> --json");
+            }
+            let data = super::agent_tools::grant_workspace(&args[1], Path::new(&args[2]))?;
+            crate::output::emit(true, data, &[], |_| {})
+        }
         Some("start") => start(&args[1..]).await,
         Some("update") => update(&args[1..]),
         Some("channel") => super::update_channel::run(&args[1..]),

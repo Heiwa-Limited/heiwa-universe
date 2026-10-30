@@ -4,6 +4,16 @@ import { useApp } from "../state/app";
 import { Conversation } from "./Conversation";
 import { Icon } from "./Icon";
 
+const CHANNEL_KEY = "heiwa.inference-channel.v1";
+type InferenceChannel = "auto" | "local" | "codex";
+function savedChannel(): InferenceChannel {
+  try {
+    const saved = window.localStorage.getItem(CHANNEL_KEY);
+    if (saved === null) return "auto";
+    return saved === "auto" || saved === "codex" ? saved : "local";
+  } catch { return "local"; }
+}
+
 /**
  * The always-present input. Responses open in place, preserving the active
  * surface; expansion presents the same durable conversation.
@@ -12,9 +22,15 @@ export function Composer(props: { caption: string }) {
   const app = useApp();
   let input: HTMLTextAreaElement | undefined;
   const [responseOpen, setResponseOpen] = createSignal(false);
-  const [channel, setChannel] = createSignal("auto");
+  const [channel, setChannel] = createSignal<InferenceChannel>(savedChannel());
   const [sending, setSending] = createSignal(false);
   const [error, setError] = createSignal<string>();
+  const chooseChannel = (value: string) => {
+    const chosen = value === "codex" || value === "auto" ? value : "local";
+    setChannel(chosen);
+    try { window.localStorage.setItem(CHANNEL_KEY, chosen); }
+    catch { setError("This inference choice applies to this window but could not be saved."); }
+  };
   onMount(() => {
     const focusChatbar = (event: KeyboardEvent) => {
       if (!event.metaKey || event.altKey || event.ctrlKey || event.key.toLowerCase() !== "l") return;
@@ -89,7 +105,7 @@ export function Composer(props: { caption: string }) {
         </Show>
       </div>
       <label class="composer-channel">Inference
-        <select aria-label="Inference channel" value={channel()} onChange={(event) => setChannel(event.currentTarget.value)} disabled={sending()}>
+        <select aria-label="Inference channel" value={channel()} onChange={(event) => chooseChannel(event.currentTarget.value)} disabled={sending()}>
           <option value="auto">Automatic</option><option value="local">On-device models only</option><option value="codex">OpenAI / Codex</option>
         </select>
       </label>

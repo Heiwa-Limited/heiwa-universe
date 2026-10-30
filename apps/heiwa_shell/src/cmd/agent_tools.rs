@@ -159,7 +159,7 @@ pub(crate) fn select_workspace(thread_id: &str) -> Result<Value> {
     let _picker = PICKER
         .try_lock()
         .map_err(|_| anyhow!("A Heiwa folder picker is already open"))?;
-    let binding = folder_binding()?;
+    folder_binding()?;
     if !cfg!(target_os = "macos") {
         bail!("native folder selection requires macOS");
     }
@@ -185,8 +185,16 @@ pub(crate) fn select_workspace(thread_id: &str) -> Result<Value> {
         result["path"]
             .as_str()
             .context("folder picker did not return a path")?,
-    )
-    .canonicalize()?;
+    );
+    grant_workspace(thread_id, &path)
+}
+
+pub(crate) fn grant_workspace(thread_id: &str, path: &Path) -> Result<Value> {
+    if thread_id.is_empty() || thread_id.len() > 256 || thread_id.chars().any(char::is_control) {
+        bail!("invalid conversation ID");
+    }
+    let binding = folder_binding()?;
+    let path = path.canonicalize()?;
     if !path.is_dir() {
         bail!("selected workspace must be a directory");
     }
@@ -194,7 +202,7 @@ pub(crate) fn select_workspace(thread_id: &str) -> Result<Value> {
     let paths = heiwa_config::HeiwaPaths::try_resolve().context("profile unavailable")?;
     let dir = paths.state_dir.join("folder-grants");
     fs::create_dir_all(&dir)?;
-    let grant = json!({"schema":"heiwa.folder-grant/v1","path":path,"binding":binding,"source":"native-directory-picker","granted_at":chrono::Utc::now().to_rfc3339()});
+    let grant = json!({"schema":"heiwa.folder-grant/v1","path":path,"binding":binding,"source":"explicit-owner-folder","granted_at":chrono::Utc::now().to_rfc3339()});
     let mut temporary = tempfile::NamedTempFile::new_in(&dir)?;
     temporary.write_all(&serde_json::to_vec(&grant)?)?;
     temporary.as_file_mut().sync_all()?;

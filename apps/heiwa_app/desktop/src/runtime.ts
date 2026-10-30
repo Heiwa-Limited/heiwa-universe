@@ -312,6 +312,10 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return invoke<T>("api_post", { path, body });
 }
 
+export async function chooseWorkspace(threadId: string): Promise<void> {
+  await invoke("select_workspace_folder", { threadId });
+}
+
 export async function operatorSubscribe(
   threadId: string,
   after: string | null,

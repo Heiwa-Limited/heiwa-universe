@@ -27,7 +27,9 @@ function run() {
             if (!folder.exists()) throw new Error('Folder ID unavailable');
             const escape = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
             const html = '<h1>'+escape(args.title)+'</h1><div>'+escape(args.body).replace(/\n/g,'<br>')+'</div>';
-            const note = app.Note({name:args.title,body:html});
+            // Notes derives its name from the first heading. Setting both
+            // name and a heading inserts the title twice in the saved note.
+            const note = app.Note({body:html});
             folder.notes.push(note);
             createdId = note.id();
             const saved = app.notes.byId(createdId);

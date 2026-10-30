@@ -6,6 +6,7 @@ pub mod operator_subscriptions;
 pub mod proxy;
 pub mod runtime_supervisor;
 pub mod updater;
+pub mod workspace;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -32,6 +33,7 @@ fn runtime_startup(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(operator_subscriptions::OperatorSubscriptions::default())
         .setup(|app| {
             // The shipped bundle updates itself. Without this the runtime
@@ -127,6 +129,7 @@ pub fn run() {
             onboarding::open_resource_guide,
             onboarding::connect_api_provider,
             onboarding::connect_codex_subscription,
+            workspace::select_workspace_folder,
             onboarding::verify_api_provider,
             onboarding::disconnect_api_provider,
             operator_stream::operator_subscribe,

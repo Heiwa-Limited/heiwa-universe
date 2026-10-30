@@ -1,5 +1,5 @@
 import { createEffect, createSignal, onCleanup, For, Show } from "solid-js";
-import { apiGet, apiPost } from "../../runtime";
+import { apiGet, chooseWorkspace } from "../../runtime";
 import { useApp } from "../../state/app";
 import type { SurfaceModule } from "../types";
 
@@ -29,7 +29,7 @@ function FilesSurface() {
   const choose = async () => {
     const threadId = app.sessions.selectedId(); if (!threadId || choosing()) return;
     setChoosing(true); setError(undefined);
-    try { await apiPost(`/api/v1/operator/threads/${encodeURIComponent(threadId)}/workspace`, {}); await load(); }
+    try { await chooseWorkspace(threadId); await load(); }
     catch { setError("The folder could not be selected. Check that Heiwa setup is complete and try again."); }
     finally { setChoosing(false); }
   };
