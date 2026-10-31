@@ -24,10 +24,10 @@ import { SettingsGroup } from "./SettingsGroup";
 import { Button } from "../ui/button";
 
 const apps = [
-  { id: "calendar", label: "Calendar", noun: "calendars" },
-  { id: "reminders", label: "Reminders", noun: "lists" },
-  { id: "notes", label: "Notes", noun: "folders" },
-  { id: "mail", label: "Mail", noun: "mailboxes" },
+  { id: "calendar", label: "Calendar", noun: "calendars", one: "calendar" },
+  { id: "reminders", label: "Reminders", noun: "lists", one: "list" },
+  { id: "notes", label: "Notes", noun: "folders", one: "folder" },
+  { id: "mail", label: "Mail", noun: "mailboxes", one: "mailbox" },
 ] as const;
 function ProposalContent({ proposal }: { proposal: NativeProposal }) {
   const action = proposal.action;
@@ -232,7 +232,7 @@ export function AppleAppsSettings() {
                   <h3 className="text-sm font-medium">{app.label}</h3>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {ids.length
-                      ? `${ids.length} ${ids.length === 1 ? app.noun.slice(0, -1) : app.noun} selected`
+                      ? `${ids.length} ${ids.length === 1 ? app.one : app.noun} selected`
                       : `No ${app.noun} selected`}
                   </p>
                 </div>
