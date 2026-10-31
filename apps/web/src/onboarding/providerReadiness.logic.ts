@@ -40,6 +40,11 @@ export function getOnboardingProviderState(provider: ServerProvider | undefined)
     return "checking";
   if (!provider.installed) return "install";
   if (provider.auth.status === "unauthenticated") return "signIn";
+  if (
+    provider.compatibilityAdvisory?.status === "broken" ||
+    provider.compatibilityAdvisory?.status === "unsupported"
+  )
+    return "attention";
   if (provider.status === "ready") return "ready";
   return "attention";
 }

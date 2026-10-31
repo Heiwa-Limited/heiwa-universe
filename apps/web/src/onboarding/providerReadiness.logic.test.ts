@@ -34,6 +34,17 @@ describe("getOnboardingProviderState", () => {
     expect(
       getOnboardingProviderState({
         ...readyCodex,
+        compatibilityAdvisory: {
+          status: "broken",
+          message: "Incompatible runtime",
+          recommendedVersion: null,
+          recommendedRange: null,
+        },
+      }),
+    ).toBe("attention");
+    expect(
+      getOnboardingProviderState({
+        ...readyCodex,
         auth: { status: "authenticated" },
         status: "error",
       }),

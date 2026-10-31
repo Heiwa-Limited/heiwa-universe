@@ -319,6 +319,7 @@ function ManagedCodexSetup({
   const [autoStartHandled, setAutoStartHandled] = useState(false);
   const installed = installation?.installedVersion != null;
   const authenticated = provider?.auth.status === "authenticated";
+  const executionReady = getOnboardingProviderState(provider) === "ready";
   const updateAvailable =
     installed &&
     installation?.source !== "local" &&
@@ -830,7 +831,7 @@ function ManagedCodexSetup({
             authenticated && !busy ? (
               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success-foreground">
                 <CheckIcon className="size-3.5" />
-                Ready
+                {executionReady ? "Connected" : "Signed in · needs attention"}
               </span>
             ) : authActive ? (
               waitingControl

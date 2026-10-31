@@ -97,6 +97,7 @@ function resolveDesktopAppStageLabel(input: {
     return "Dev";
   }
 
+  if (input.appVersion.includes("-preview.")) return "Preview";
   return isNightlyDesktopVersion(input.appVersion) ? "Nightly" : "Beta";
 }
 
