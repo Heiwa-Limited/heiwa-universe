@@ -59,6 +59,22 @@ const withWindowsEnvironmentMocks = <A, E, R>(
   );
 
 describe("readEnvironmentFromLoginShell", () => {
+  it("force-stops the probe at its deadline even when a child handles termination", () => {
+    let failure: unknown;
+    try {
+      readEnvironmentFromLoginShell(process.execPath, ["PATH"], (file, _args, options) =>
+        NodeChildProcess.execFileSync(
+          file,
+          ["-e", "process.on('SIGTERM', () => process.exit(77)); setInterval(() => {}, 1000);"],
+          { ...options, timeout: 250 },
+        ),
+      );
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({ signal: "SIGKILL" });
+  });
+
   // Opt in with an explicit binary, like the provider live probes; CI need not install Nu.
   it.runIf(process.env.T3_TEST_NU_PATH !== undefined)(
     "captures Nushell PATH and multiline values without external tools",
