@@ -60,10 +60,17 @@ export const NativeReadInput = Schema.Struct({
   end: Schema.optional(Instant),
   includeCompleted: Schema.optional(Schema.Boolean),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
-  /** Mail only: case-insensitive subject or sender match. */
-  query: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
-  /** Mail only: read these messages with their full content. */
-  ids: Schema.optional(Schema.Array(Id).check(Schema.isMinLength(1), Schema.isMaxLength(5))),
+  query: Schema.optional(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
+      description: "Mail only: subject or sender text. Omit for other apps.",
+    }),
+  ),
+  ids: Schema.optional(
+    Schema.Array(Id).check(Schema.isMinLength(1), Schema.isMaxLength(5)).annotate({
+      description:
+        "Mail only: message ids from an earlier Mail read, to get full text. Omit to list items.",
+    }),
+  ),
 });
 export type NativeReadInput = typeof NativeReadInput.Type;
 export const NativeReadResult = Schema.Struct({
