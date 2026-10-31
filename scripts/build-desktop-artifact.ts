@@ -2770,6 +2770,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
 ) {
+  const licenseRoot = yield* RepoRoot;
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
@@ -2793,6 +2794,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     ...(platform === "mac" ? { asarUnpack: ["**/dist/native/heiwa-apple"] } : {}),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
+      { from: `${licenseRoot}/LICENSE`, to: "licenses/T3-LICENSE.txt" },
+      { from: `${licenseRoot}/NOTICE`, to: "licenses/NOTICE.txt" },
       ...(platform === "linux" ? LINUX_CAPTURE_EXTRA_RESOURCES : []),
       ...(platform === "linux" ? LINUX_BROWSER_SECRET_EXTRA_RESOURCES : []),
       ...(platform === "win" ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
@@ -2901,7 +2904,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       icon: "icons",
       category: "Development",
       synopsis: "Desktop GUI for coding agents",
-      maintainer: "T3 Tools <hello@t3.codes>",
+      maintainer: "Heiwa Limited",
       protocols: [
         {
           name: "Heiwa",
@@ -3858,7 +3861,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
       ? path.join(stageAppDir, WINDOWS_SERVER_RESOURCE_SOURCE_DIR, WINDOWS_SERVER_ASAR_RESOURCE)
       : undefined;
   const stagePackageJson: StagePackageJson = {
-    name: "t3code",
+    name: "heiwa-desktop",
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
@@ -3867,10 +3870,10 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     private: true,
     packageManager: rootPackageJson.packageManager,
     description:
-      "Heiwa is an open-source desktop app for coding agents. Work with your existing agent subscriptions, review code changes, and run commands in your projects. Connect from desktop, web, or mobile to continue working remotely.",
+      "Heiwa is a macOS workspace for Apple apps, local AI, subscription agents and reusable workflows, built on the MIT-licensed T3 Code foundation.",
     license: "MIT",
-    homepage: "https://t3.codes",
-    author: "T3 Tools",
+    homepage: "https://github.com/Heiwa-Limited/heiwa-universe",
+    author: "Heiwa Limited",
     main: "apps/desktop/dist-electron/boot.cjs",
     build: yield* createBuildConfig(
       options.platform,
