@@ -5,6 +5,8 @@ import {
   type NativeProposal,
   type NativeResource,
 } from "@t3tools/contracts";
+import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import * as Cause from "effect/Cause";
 import { AppleIcon, RefreshCwIcon } from "lucide-react";
 import {
   nativeApprove,
@@ -126,13 +128,23 @@ export function AppleAppsSettings() {
   );
   const [busy, setBusy] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<NativeProposal | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  // Native failures carry the next step (a macOS permission, a stale item); never drop them.
+  const settle = <A, E>(result: AtomCommandResult<A, E>) => {
+    if (result._tag === "Success") {
+      setFailure(null);
+      return result.value;
+    }
+    const error = Cause.squash(result.cause);
+    setFailure(error instanceof Error ? error.message : "The Apple app did not respond.");
+    return null;
+  };
   const connect = async (app: NativeApp) => {
     if (!environmentId || !canManage) return;
     setBusy(app);
     try {
-      const result = await inventory({ environmentId, input: { app, requestAccess: true } });
-      if (result._tag === "Success")
-        setResources((current) => ({ ...current, [app]: result.value }));
+      const value = settle(await inventory({ environmentId, input: { app, requestAccess: true } }));
+      if (value !== null) setResources((current) => ({ ...current, [app]: value }));
     } finally {
       setBusy(null);
       query.refresh();
@@ -143,13 +155,15 @@ export function AppleAppsSettings() {
     const ids = query.data?.grants.find((row) => row.app === app)?.resourceIds ?? [];
     setBusy(app);
     try {
-      await select({
-        environmentId,
-        input: {
-          app,
-          resourceIds: ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id],
-        },
-      });
+      settle(
+        await select({
+          environmentId,
+          input: {
+            app,
+            resourceIds: ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id],
+          },
+        }),
+      );
     } finally {
       setBusy(null);
       query.refresh();
@@ -159,8 +173,10 @@ export function AppleAppsSettings() {
     if (!environmentId || !canManage || busy !== null) return;
     setBusy(proposal.id);
     try {
-      const result = await approve({ environmentId, input: { id: proposal.id, approve: value } });
-      if (result._tag === "Success") setReceipt(result.value);
+      const result = settle(
+        await approve({ environmentId, input: { id: proposal.id, approve: value } }),
+      );
+      if (result !== null) setReceipt(result);
     } finally {
       setBusy(null);
       query.refresh();
@@ -175,9 +191,9 @@ export function AppleAppsSettings() {
             Apple apps
           </h2>
           <p className="mt-2 max-w-lg text-sm text-muted-foreground">
-            Choose the calendars, lists, folders and mailboxes Heiwa can use. Agents can read your selection
-            and prepare changes. Review each change, or allow routine changes from chats with Full
-            access. Removal and Notes body replacement always require review.
+            Choose the calendars, lists, folders and mailboxes Heiwa can use. Agents can read your
+            selection and prepare changes. Review each change, or allow routine changes from chats
+            with Full access. Removal and Notes body replacement always require review.
           </p>
         </div>
         <Button
@@ -192,6 +208,11 @@ export function AppleAppsSettings() {
       {query.error ? (
         <p role="alert" className="mb-4 text-sm text-destructive">
           {query.error}
+        </p>
+      ) : null}
+      {failure ? (
+        <p role="alert" className="mb-4 text-sm text-destructive">
+          {failure}
         </p>
       ) : null}
       {query.data?.platform !== undefined && query.data.platform !== "darwin" ? (
@@ -355,14 +376,16 @@ export function AppleAppsSettings() {
                           if (!environmentId) return;
                           setBusy(proposal.id);
                           try {
-                            const result = await resolve({
-                              environmentId,
-                              input: {
-                                id: proposal.id,
-                                note: resolutionNotes[proposal.id]!.trim(),
-                              },
-                            });
-                            if (result._tag === "Success") setReceipt(result.value);
+                            const result = settle(
+                              await resolve({
+                                environmentId,
+                                input: {
+                                  id: proposal.id,
+                                  note: resolutionNotes[proposal.id]!.trim(),
+                                },
+                              }),
+                            );
+                            if (result !== null) setReceipt(result);
                           } finally {
                             setBusy(null);
                             query.refresh();
