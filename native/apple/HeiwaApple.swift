@@ -21,12 +21,22 @@ import EventKit
               let d = iso.date(from:s), let civil = iso.date(from:String(s.prefix(19))+"Z"),
               iso.string(from:civil) == String(s.prefix(19))+"Z" else { throw Failure.invalid }; return d
     }
+    static func canonicalEnd(_ event: EKEvent) -> Date? {
+        guard let end = event.endDate else { return nil }
+        let parts = Calendar.current.dateComponents([.hour,.minute,.second],from:end)
+        // EventKit on macOS 27 exposes the inclusive last second for floating all-day ends.
+        if event.isAllDay, parts.hour == 23, parts.minute == 59, parts.second == 59 {
+            return Calendar.current.date(byAdding:.day,value:1,to:Calendar.current.startOfDay(for:end))
+        }
+        return end
+    }
     static func row(_ event: EKEvent) throws -> [String: Any] {
-        guard let id = event.eventIdentifier, let calendar = event.calendar else { throw Failure.missing }
+        guard let id = event.eventIdentifier, let calendar = event.calendar,
+              let start = event.startDate, let end = canonicalEnd(event) else { throw Failure.missing }
         // Recurring occurrences are readable; editing a series needs an explicit span contract.
         return ["app":"calendar", "id":id, "resourceId":calendar.calendarIdentifier,
                 "title":String((event.title ?? "").prefix(16000)), "body":String((event.notes ?? "").prefix(16000)),
-                "start":iso.string(from:event.startDate), "end":iso.string(from:event.endDate),
+                "start":iso.string(from:start), "end":iso.string(from:end),
                 "completed":false, "allDay":event.isAllDay, "modifiedAt":event.lastModifiedDate.map { iso.string(from:$0) } ?? NSNull(),
                 "recurring":event.hasRecurrenceRules || event.isDetached,
                 "hasAttendees":event.hasAttendees, "contentTruncated":(event.title ?? "").utf8.count > 16000 || (event.notes ?? "").utf8.count > 16000]
@@ -146,12 +156,20 @@ import EventKit
                 }
                 if let title = q["title"] { event.title = try string(title,max:800) }
                 if let body = q["body"] { event.notes = try string(body) }
-                if let start = q["start"] { event.startDate = try date(start) }
-                if let end = q["end"] { event.endDate = try date(end) }
-                if let allDay = q["allDay"] as? Bool { event.isAllDay = allDay }
-                if event.isAllDay { for date in [event.startDate,event.endDate].compactMap({$0}) { let c = Calendar.current.dateComponents([.hour,.minute,.second],from:date); guard c.hour == 0, c.minute == 0, c.second == 0 else { throw Failure.invalid } } }
+                let start = q["start"] != nil ? try date(q["start"]) : event.startDate
+                let end = q["end"] != nil ? try date(q["end"]) : canonicalEnd(event)
+                let allDay = q["allDay"] as? Bool ?? event.isAllDay
                 guard let title = event.title, !title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
-                      let start = event.startDate, let end = event.endDate, end > start else { throw Failure.invalid }
+                      let start, let end, end > start else { throw Failure.invalid }
+                if allDay {
+                    for boundary in [start,end] {
+                        let c = Calendar.current.dateComponents([.hour,.minute,.second],from:boundary)
+                        guard c.hour == 0, c.minute == 0, c.second == 0 else { throw Failure.invalid }
+                    }
+                }
+                event.isAllDay = allDay
+                event.startDate = start
+                event.endDate = allDay ? end.addingTimeInterval(-1) : end
                 try store.save(event,span:.thisEvent,commit:true)
                 guard let saved = store.event(withIdentifier:event.eventIdentifier) else { throw Failure.uncertain }
                 output(["record":try row(saved)]); return
