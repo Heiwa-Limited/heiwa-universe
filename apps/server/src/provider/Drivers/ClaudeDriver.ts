@@ -31,8 +31,10 @@ import {
   makePendingClaudeProvider,
   probeClaudeCapabilities,
   probeClaudeWorkspaceSnapshot,
+  runClaudeCommand,
   type ClaudeCapabilitiesProbe,
 } from "../ClaudeProvider.ts";
+import { makeClaudeAuth } from "../ClaudeAuth.ts";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 import { resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";
@@ -58,8 +60,11 @@ import {
 import {
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
+  makeClaudeEnvironment,
   resolveClaudeHomePath,
 } from "./ClaudeHome.ts";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { ProviderSetupError } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
@@ -161,13 +166,25 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         ? configDir
         : undefined,
     );
-    const stampIdentity = withInstanceIdentity({
+    const identity = withInstanceIdentity({
       instanceId,
       driverKind: DRIVER_KIND,
       displayName,
       accentColor,
       continuationGroupKey,
     });
+    const stampIdentity = (draft: Parameters<typeof identity>[0]) => {
+      const provider = identity(draft);
+      return {
+        ...provider,
+        setup: {
+          ...provider.setup,
+          canAuthenticate: true,
+          canInstall: provider.setup?.canInstall ?? false,
+        },
+        auth: { ...provider.auth, canLogout: provider.auth.status === "authenticated" },
+      };
+    };
 
     const scopedLimitNames = yield* makeClaudeScopedLimitNames;
     const orchestrationAdapter = yield* createClaudeAdapterV2(
@@ -385,6 +402,52 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       ),
     );
 
+    const claudeEnvironment = yield* makeClaudeEnvironment(effectiveConfig, processEnv);
+    const auth = yield* makeClaudeAuth({
+      instanceId,
+      configDir,
+      cwd: stateDir,
+      command: (args) =>
+        resolveSpawnCommand(effectiveConfig.binaryPath, args, { env: claudeEnvironment }).pipe(
+          Effect.map((resolved) => ({
+            command: resolved.command,
+            args: resolved.args,
+            env: claudeEnvironment,
+          })),
+        ),
+      run: (args) =>
+        runClaudeCommand(effectiveConfig, args, processEnv, stateDir).pipe(
+          Effect.map((result) => ({ stdout: result.stdout, code: result.code })),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(Path.Path, path),
+          Effect.mapError(
+            (cause) =>
+              new ProviderSetupError({
+                instanceId,
+                operation: "status",
+                detail: "Could not run Claude Code on this Mac.",
+                cause,
+              }),
+          ),
+        ),
+      onChanged: (signedIn) =>
+        Cache.invalidateAll(capabilitiesProbeCache).pipe(
+          Effect.andThen(snapshot.refresh),
+          Effect.flatMap((provider) =>
+            !signedIn || provider.auth.status === "authenticated"
+              ? Effect.void
+              : Effect.fail(
+                  new ProviderSetupError({
+                    instanceId,
+                    operation: "verify",
+                    detail:
+                      provider.message ?? "Claude sign-in finished but Heiwa could not verify it.",
+                  }),
+                ),
+          ),
+        ),
+    });
+
     return {
       instanceId,
       driverKind: DRIVER_KIND,
@@ -408,6 +471,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       orchestrationAdapter,
       textGeneration,
       consumeResetCredit,
+      auth,
     } satisfies ProviderInstance;
   }),
 };
