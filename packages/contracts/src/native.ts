@@ -17,7 +17,12 @@ const Instant = Schema.String.check(
 );
 const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1024));
 const Text = Schema.String.check(Schema.isMaxLength(16000));
-export const NativeApp = Schema.Literals(["calendar", "reminders", "notes"]);
+export const NativeApp = Schema.Literals(["calendar", "reminders", "notes", "mail"]);
+/** Mail addresses only; display names are never accepted from agents. */
+const Email = Schema.String.check(
+  Schema.isMaxLength(320),
+  Schema.isPattern(/^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/),
+);
 export type NativeApp = typeof NativeApp.Type;
 export const NativeResource = Schema.Struct({
   app: NativeApp,
@@ -40,6 +45,11 @@ export const NativeRecord = Schema.Struct({
   priority: Schema.optional(Schema.Number),
   allDay: Schema.optional(Schema.Boolean),
   locked: Schema.optional(Schema.Boolean),
+  /** Mail: sender as shown by Mail and To recipients. `completed` is the read state. */
+  sender: Schema.optional(Text),
+  recipients: Schema.optional(Schema.Array(Text).check(Schema.isMaxLength(50))),
+  /** Mail: full message text, fetched only for reads by id. Not part of the revision. */
+  content: Schema.optional(Text),
   modifiedAt: Schema.NullOr(Schema.String),
   revision: Id,
 });
@@ -50,6 +60,10 @@ export const NativeReadInput = Schema.Struct({
   end: Schema.optional(Instant),
   includeCompleted: Schema.optional(Schema.Boolean),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
+  /** Mail only: case-insensitive subject or sender match. */
+  query: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))),
+  /** Mail only: read these messages with their full content. */
+  ids: Schema.optional(Schema.Array(Id).check(Schema.isMinLength(1), Schema.isMaxLength(5))),
 });
 export type NativeReadInput = typeof NativeReadInput.Type;
 export const NativeReadResult = Schema.Struct({
@@ -70,6 +84,8 @@ export const NativeAction = Schema.Struct({
   due: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isMaxLength(40)))),
   priority: Schema.optional(Schema.Literals([0, 1, 5, 9])),
   allDay: Schema.optional(Schema.Boolean),
+  /** Mail drafts only. Heiwa saves drafts; sending stays in Mail. */
+  recipients: Schema.optional(Schema.Array(Email).check(Schema.isMaxLength(20))),
 });
 export type NativeAction = typeof NativeAction.Type;
 export const NativeProposal = Schema.Struct({

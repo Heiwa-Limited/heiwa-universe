@@ -36,7 +36,7 @@ const range = {
 const catalog = [
   {
     id: "daily-brief",
-    description: "Read the selected Apple schedule and reminder lists in one bounded response.",
+    description: "Read the selected Apple schedule, reminder lists and today's unread mail in one bounded response.",
     modelCalls: 0,
   },
   {

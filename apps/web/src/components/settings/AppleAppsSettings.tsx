@@ -25,6 +25,7 @@ const apps = [
   { id: "calendar", label: "Calendar", noun: "calendars" },
   { id: "reminders", label: "Reminders", noun: "lists" },
   { id: "notes", label: "Notes", noun: "folders" },
+  { id: "mail", label: "Mail", noun: "mailboxes" },
 ] as const;
 function ProposalContent({ proposal }: { proposal: NativeProposal }) {
   const action = proposal.action;
@@ -69,8 +70,22 @@ function ProposalContent({ proposal }: { proposal: NativeProposal }) {
           Replaces the note body with plain text, including its formatting.
         </p>
       ) : null}
+      {action.recipients?.length ? (
+        <p className="break-all text-muted-foreground">To: {action.recipients.join(", ")}</p>
+      ) : null}
+      {action.app === "mail" && action.operation === "create" ? (
+        <p className="text-muted-foreground">Saves a draft in Mail. Heiwa never sends mail.</p>
+      ) : null}
       {action.completed !== undefined ? (
-        <p>{action.completed ? "Mark completed" : "Mark incomplete"}</p>
+        <p>
+          {action.app === "mail"
+            ? action.completed
+              ? "Mark read"
+              : "Mark unread"
+            : action.completed
+              ? "Mark completed"
+              : "Mark incomplete"}
+        </p>
       ) : null}
       <p className="break-all text-xs text-muted-foreground">
         {target
@@ -81,7 +96,9 @@ function ProposalContent({ proposal }: { proposal: NativeProposal }) {
         <p className="font-medium text-destructive">
           {action.app === "notes"
             ? "Removes this note using Apple Notes. Recovery depends on its account."
-            : "Permanently removes this item from its Apple app."}
+            : action.app === "mail"
+              ? "Moves this message to its account's Trash in Mail."
+              : "Permanently removes this item from its Apple app."}
         </p>
       ) : null}
       {proposal.detail ? (
@@ -158,7 +175,7 @@ export function AppleAppsSettings() {
             Apple apps
           </h2>
           <p className="mt-2 max-w-lg text-sm text-muted-foreground">
-            Choose the calendars, lists and folders Heiwa can use. Agents can read your selection
+            Choose the calendars, lists, folders and mailboxes Heiwa can use. Agents can read your selection
             and prepare changes. Review each change, or allow routine changes from chats with Full
             access. Removal and Notes body replacement always require review.
           </p>

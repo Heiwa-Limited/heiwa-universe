@@ -18,6 +18,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as MailIndex from "./MailIndex.ts";
 import * as NativeHost from "./NativeHost.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -65,6 +66,11 @@ const decodeRow = Effect.fn("NativeWorkflows.decodeRow")(function* (row: Proposa
   };
 });
 export const validateAction = (action: typeof NativeAction.Type) => {
+  // Mail supports read state, drafts and Trash. Heiwa never sends or edits received mail.
+  if (action.app === "mail" && !["create", "complete", "trash"].includes(action.operation))
+    return false;
+  if (action.recipients !== undefined && (action.app !== "mail" || action.operation !== "create"))
+    return false;
   if (
     action.operation === "append" &&
     (action.app !== "notes" || !action.body?.trim() || action.title !== undefined)
@@ -96,7 +102,7 @@ export const validateAction = (action: typeof NativeAction.Type) => {
     return false;
   if (
     action.operation === "complete" &&
-    (action.app !== "reminders" || action.completed === undefined)
+    ((action.app !== "reminders" && action.app !== "mail") || action.completed === undefined)
   )
     return false;
   if (action.app !== "reminders" && (action.due !== undefined || action.priority !== undefined))
@@ -141,6 +147,10 @@ export const validateAction = (action: typeof NativeAction.Type) => {
     return false;
   return true;
 };
+
+const mailAccount = (url: string) => /^[a-z]+:\/\/[^/]+\//.exec(url)?.[0];
+export const sameMailAccount = (a: string, b: string) =>
+  mailAccount(a) !== undefined && mailAccount(a) === mailAccount(b);
 
 export const nativeDayWindow = (now: DateTime.Utc, zone: DateTime.TimeZone) => {
   const start = DateTime.startOf(DateTime.setZone(now, zone), "day");
@@ -198,6 +208,8 @@ const make = Effect.gen(function* () {
     };
   });
   const readRaw = Effect.fn("NativeWorkflows.readRaw")(function* (input: NativeReadInput) {
+    if (input.app !== "mail" && (input.query !== undefined || input.ids !== undefined))
+      return yield* failure("invalid", "Search and reads by id are available for Mail only.");
     if (input.app === "calendar") {
       if (
         input.start === undefined ||
@@ -229,7 +241,7 @@ const make = Effect.gen(function* () {
     if (!(yield* selected(action.app)).includes(action.resourceId))
       return yield* failure(
         "selection",
-        "Choose this calendar, list or folder in Apple apps settings before using it.",
+        "Choose this calendar, list, folder or mailbox in Apple apps settings before using it.",
       );
   });
   const findExpected = Effect.fn("NativeWorkflows.findExpected")(function* (
@@ -315,7 +327,7 @@ const make = Effect.gen(function* () {
     )
       return yield* failure(
         "stale",
-        "The target calendar, list or folder changed. Create a fresh proposal.",
+        "The target calendar, list, folder or mailbox changed. Create a fresh proposal.",
       );
     const expected = row.expected_json === null ? null : yield* decodeSnapshot(row.expected_json);
     // Claim durably before crossing the process boundary. A crash leaves an explicit uncertain operation.
@@ -335,13 +347,21 @@ const make = Effect.gen(function* () {
       action.operation === "trash"
         ? raw === null
         : raw !== null &&
-          raw.resourceId === action.resourceId &&
+          (action.app === "mail" && action.operation === "create"
+            ? // Drafts land in the account's own drafts mailbox, not the selected one.
+              sameMailAccount(raw.resourceId, action.resourceId)
+            : raw.resourceId === action.resourceId) &&
+          (action.recipients === undefined ||
+            (raw.recipients ?? []).join("\n").toLowerCase() ===
+              action.recipients.join("\n").toLowerCase()) &&
           (action.title === undefined || raw.title === action.title) &&
           (action.body === undefined ||
-            (action.operation === "append"
-              ? raw.body.replace(/\n$/, "").endsWith(action.body.replace(/\n$/, "")) &&
-                raw.body.startsWith(expected?.body ?? "")
-              : raw.body.replace(/\n$/, "") === action.body.replace(/\n$/, ""))) &&
+            (action.app === "mail"
+              ? MailIndex.normalizeText(raw.body) === MailIndex.normalizeText(action.body)
+              : action.operation === "append"
+                ? raw.body.replace(/\n$/, "").endsWith(action.body.replace(/\n$/, "")) &&
+                  raw.body.startsWith(expected?.body ?? "")
+                : raw.body.replace(/\n$/, "") === action.body.replace(/\n$/, ""))) &&
           (action.completed === undefined || raw.completed === action.completed) &&
           (action.due === undefined ||
             raw.due === action.due ||
@@ -439,7 +459,7 @@ const make = Effect.gen(function* () {
           input.start === undefined && input.end === undefined
             ? nativeDayWindow(yield* DateTime.now, DateTime.zoneMakeLocal())
             : { start: input.start, end: input.end };
-        const sources = yield* Effect.forEach(["calendar", "reminders"] as const, (app) =>
+        const sources = yield* Effect.forEach(["calendar", "reminders", "mail"] as const, (app) =>
           read({ app, ...window, limit: input.limit ?? 10 }).pipe(
             Effect.map((result) => ({ app, ...result, error: null })),
             Effect.catch((error) =>

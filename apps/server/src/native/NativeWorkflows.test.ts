@@ -128,14 +128,12 @@ describe("native workflow authority", () => {
       assert.equal((yield* execute).status, "applied");
       assert.equal(checks, 3);
       assert.equal(f.writes(), 1);
-      const denied = service
-        .execute(create)
-        .pipe(
-          Effect.provideService(NativeWorkflows.NativeExecutionAuthority, {
-            origin: "revoked",
-            check: Effect.fail(new NativeWorkflowError({ code: "permission", detail: "Revoked" })),
-          }),
-        );
+      const denied = service.execute(create).pipe(
+        Effect.provideService(NativeWorkflows.NativeExecutionAuthority, {
+          origin: "revoked",
+          check: Effect.fail(new NativeWorkflowError({ code: "permission", detail: "Revoked" })),
+        }),
+      );
       assert.equal((yield* denied.pipe(Effect.result))._tag, "Failure");
       assert.equal(f.writes(), 1);
       assert.equal(
@@ -278,4 +276,46 @@ it("validates reminder due dates and prevents cross-app reminder metadata", () =
   assert.isFalse(NativeWorkflows.validateAction({ ...create, due: "2026-02-30" }));
   assert.isFalse(NativeWorkflows.validateAction({ ...create, allDay: true }));
   assert.isFalse(NativeWorkflows.validateAction({ ...create, app: "notes", priority: 1 }));
+});
+
+it("limits Mail to drafts, read state and Trash, and keeps recipients on Mail drafts", () => {
+  const draft = {
+    app: "mail" as const,
+    operation: "create" as const,
+    resourceId: "imap://ACCOUNT/INBOX",
+    title: "Subject",
+    body: "Text",
+    recipients: ["someone@example.com"],
+  };
+  const existing = { id: "42", expectedRevision: "rev" };
+  assert.isTrue(NativeWorkflows.validateAction(draft));
+  assert.isTrue(
+    NativeWorkflows.validateAction({
+      ...existing,
+      app: "mail",
+      operation: "complete",
+      resourceId: draft.resourceId,
+      completed: true,
+    }),
+  );
+  assert.isTrue(
+    NativeWorkflows.validateAction({
+      ...existing,
+      app: "mail",
+      operation: "trash",
+      resourceId: draft.resourceId,
+    }),
+  );
+  assert.isFalse(
+    NativeWorkflows.validateAction({
+      ...existing,
+      app: "mail",
+      operation: "update",
+      resourceId: draft.resourceId,
+      title: "Rewritten received mail",
+    }),
+  );
+  assert.isFalse(NativeWorkflows.validateAction({ ...create, recipients: ["a@example.com"] }));
+  assert.isTrue(NativeWorkflows.sameMailAccount("imap://A/INBOX", "imap://A/%5BGmail%5D/Drafts"));
+  assert.isFalse(NativeWorkflows.sameMailAccount("imap://A/INBOX", "imap://B/INBOX"));
 });
