@@ -56,10 +56,11 @@ Verdicts:
 
 ## Rules that follow
 
-1. **Unattended turns do not write.** A turn started by a schedule, a webhook or another agent
-   reads untrusted content (mail, web pages, webhook bodies) with nobody watching. It may propose
-   Apple changes for review; `heiwa_native_execute` refuses it whatever the app's write mode.
-   Automatic writes need a turn the user started (`isUnattendedMessage` in contracts).
+1. **Unattended turns do not write.** A turn that the user did not type at a client (a schedule,
+   a webhook, another agent, a usage-limit resume, a subagent) reads untrusted content such as
+   mail, web pages and webhook bodies with nobody watching. It may propose Apple changes for
+   review; `heiwa_native_execute` refuses it whatever the app's write mode. The server stamps
+   some of its own messages `createdBy: "user"`, so "attended" is never `createdBy` alone.
 2. **One inbox.** Anything waiting on the user (an Apple proposal, a thread approval, an uncertain
    write) is listed in one place and raises the same notification. A new kind of pending item
    joins that list.

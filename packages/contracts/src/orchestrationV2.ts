@@ -1289,13 +1289,6 @@ export const OrchestrationV2ConversationMessage = Schema.Struct({
 });
 export type OrchestrationV2ConversationMessage = typeof OrchestrationV2ConversationMessage.Type;
 
-/** Nobody wrote this message by hand: an agent, the server or a scheduled task sent it. */
-export function isUnattendedMessage(
-  message: Pick<OrchestrationV2ConversationMessage, "createdBy" | "scheduledTaskId">,
-): boolean {
-  return message.createdBy !== "user" || message.scheduledTaskId !== undefined;
-}
-
 export const OrchestrationV2PlanStep = Schema.Struct({
   id: TrimmedNonEmptyString,
   text: TrimmedNonEmptyString,
