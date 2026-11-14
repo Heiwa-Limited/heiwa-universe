@@ -139,48 +139,44 @@ export function AppleAppsSettings() {
     setFailure(error instanceof Error ? error.message : "The Apple app did not respond.");
     return null;
   };
-  const connect = async (app: NativeApp) => {
-    if (!environmentId || !canManage) return;
-    setBusy(app);
-    try {
-      const value = settle(await inventory({ environmentId, input: { app, requestAccess: true } }));
-      if (value !== null) setResources((current) => ({ ...current, [app]: value }));
-    } finally {
+  // React Compiler skips functions with try/finally, so release the busy state on the promise.
+  const whileBusy = <A,>(key: string, run: () => Promise<A>) => {
+    setBusy(key);
+    return run().finally(() => {
       setBusy(null);
       query.refresh();
-    }
+    });
+  };
+  const connect = async (app: NativeApp) => {
+    if (!environmentId || !canManage) return;
+    const value = settle(
+      await whileBusy(app, () => inventory({ environmentId, input: { app, requestAccess: true } })),
+    );
+    if (value !== null) setResources((current) => ({ ...current, [app]: value }));
   };
   const toggle = async (app: NativeApp, id: string) => {
     if (!environmentId || !canManage || busy !== null) return;
     const ids = query.data?.grants.find((row) => row.app === app)?.resourceIds ?? [];
-    setBusy(app);
-    try {
-      settle(
-        await select({
+    settle(
+      await whileBusy(app, () =>
+        select({
           environmentId,
           input: {
             app,
             resourceIds: ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id],
           },
         }),
-      );
-    } finally {
-      setBusy(null);
-      query.refresh();
-    }
+      ),
+    );
   };
   const answer = async (proposal: NativeProposal, value: boolean) => {
     if (!environmentId || !canManage || busy !== null) return;
-    setBusy(proposal.id);
-    try {
-      const result = settle(
-        await approve({ environmentId, input: { id: proposal.id, approve: value } }),
-      );
-      if (result !== null) setReceipt(result);
-    } finally {
-      setBusy(null);
-      query.refresh();
-    }
+    const result = settle(
+      await whileBusy(proposal.id, () =>
+        approve({ environmentId, input: { id: proposal.id, approve: value } }),
+      ),
+    );
+    if (result !== null) setReceipt(result);
   };
   return (
     <SettingsPageContainer>
@@ -254,16 +250,12 @@ export function AppleAppsSettings() {
                     onChange={async (event) => {
                       if (!environmentId) return;
                       const writeMode = event.currentTarget.checked ? "automatic" : "review";
-                      setBusy(app.id);
-                      try {
-                        await select({
+                      await whileBusy(app.id, () =>
+                        select({
                           environmentId,
                           input: { app: app.id, resourceIds: ids, writeMode },
-                        });
-                      } finally {
-                        setBusy(null);
-                        query.refresh();
-                      }
+                        }),
+                      );
                     }}
                   />
                   <span>
@@ -374,22 +366,18 @@ export function AppleAppsSettings() {
                         }
                         onClick={async () => {
                           if (!environmentId) return;
-                          setBusy(proposal.id);
-                          try {
-                            const result = settle(
-                              await resolve({
+                          const result = settle(
+                            await whileBusy(proposal.id, () =>
+                              resolve({
                                 environmentId,
                                 input: {
                                   id: proposal.id,
                                   note: resolutionNotes[proposal.id]!.trim(),
                                 },
                               }),
-                            );
-                            if (result !== null) setReceipt(result);
-                          } finally {
-                            setBusy(null);
-                            query.refresh();
-                          }
+                            ),
+                          );
+                          if (result !== null) setReceipt(result);
                         }}
                       >
                         Record checked outcome

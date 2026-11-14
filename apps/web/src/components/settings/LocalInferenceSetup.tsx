@@ -15,12 +15,11 @@ export function LocalInferenceSetup({ environmentId }: { environmentId: Environm
   const run = async () => {
     if (busy || !readEnvironmentScope(environmentId, AuthProvidersManageScope)) return;
     setBusy(true);
-    try {
-      const result = await connect({ environmentId, input: { endpoint } });
-      if (result._tag === "Success") setConnectedModel(result.value.model);
-    } finally {
-      setBusy(false);
-    }
+    // React Compiler skips functions with try/finally, so release the busy state on the promise.
+    const result = await connect({ environmentId, input: { endpoint } }).finally(() =>
+      setBusy(false),
+    );
+    if (result._tag === "Success") setConnectedModel(result.value.model);
   };
   return (
     <SettingsGroup className="mb-6 p-4">
