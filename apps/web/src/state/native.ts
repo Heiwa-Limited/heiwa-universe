@@ -22,10 +22,6 @@ export const nativeApprove = createEnvironmentRpcCommand(connectionAtomRuntime, 
   label: "heiwa:native:approve",
   tag: WS_METHODS.nativeApprove,
 });
-export const nativeWorkflow = createEnvironmentRpcCommand(connectionAtomRuntime, {
-  label: "heiwa:native:workflow",
-  tag: WS_METHODS.nativeWorkflow,
-});
 
 export const nativeResolve = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "heiwa:native:resolve",

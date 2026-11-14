@@ -16,7 +16,7 @@ import * as Schema from "effect/Schema";
  * CLAUDE_CONFIG_DIR). Heiwa only drives `claude auth login` in a terminal the
  * user can see, so the browser link, pasted code and any prompts stay Claude's.
  */
-export const CLAUDE_AUTH_METHODS: ReadonlyArray<ProviderAuthMethod> = [
+const CLAUDE_AUTH_METHODS: ReadonlyArray<ProviderAuthMethod> = [
   {
     id: "claudeai",
     name: "Claude subscription",

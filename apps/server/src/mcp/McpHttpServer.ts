@@ -1154,9 +1154,9 @@ export const layerMcpTransport = McpServer.layerHttp({
 }).pipe(Layer.provide(layerMcpAuthMiddleware));
 
 /** Every tool the T3 MCP server advertises. AgentContextBudget.test.ts measures this set. */
-export const layerLocalToolkit = toolkitRegistration(LocalToolkit, LocalHandlers.layer);
+const layerLocalToolkit = toolkitRegistration(LocalToolkit, LocalHandlers.layer);
 
-export const layerNativeToolkit = toolkitRegistration(NativeToolkit, NativeHandlers.layer);
+const layerNativeToolkit = toolkitRegistration(NativeToolkit, NativeHandlers.layer);
 
 export const layerTools = Layer.mergeAll(
   layerLocalToolkit,

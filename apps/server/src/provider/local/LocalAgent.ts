@@ -28,7 +28,7 @@ export interface LocalTool {
   readonly description: string;
   readonly parameters: unknown;
 }
-export class LocalAgentError extends Error {
+class LocalAgentError extends Error {
   readonly _tag = "LocalAgentError";
   readonly code: "endpoint" | "transport" | "incomplete" | "budget" | "protocol";
   constructor(code: LocalAgentError["code"], message: string) {
@@ -92,7 +92,7 @@ async function boundedBody(response: Response, maximum = 2 * 1024 * 1024) {
     reader.releaseLock();
   }
 }
-export async function localOllamaJson(
+async function localOllamaJson(
   endpoint: URL,
   route: string,
   body: unknown,

@@ -56,7 +56,7 @@ export const LOCAL_WORKSPACE_TOOLS: ReadonlyArray<LocalTool> = [
     parameters: Schema.toJsonSchemaDocument(ProcessInput).schema,
   },
 ];
-export function workspaceSandbox(root: string, helper?: string) {
+function workspaceSandbox(root: string, helper?: string) {
   const quote = (value: string) => {
     if (/[\x00-\x1f\x7f]/.test(value)) throw new Error("Invalid workspace path.");
     return encode(value);

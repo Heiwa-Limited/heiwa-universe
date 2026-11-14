@@ -27,6 +27,11 @@
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
+        // Release tooling the removed upstream workflows ran. Run by hand until
+        // Heiwa has its own release workflow.
+        "build-cli-archive.ts",
+        "resolve-nightly-release.ts",
+        "smoke-cli-archive.ts",
         "knip-schemas.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",
