@@ -1,6 +1,11 @@
-import { NativeWorkflowError } from "@t3tools/contracts";
+import {
+  isUnattendedMessage,
+  NativeWorkflowError,
+  type OrchestrationV2ThreadShell,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as NativeWorkflows from "../../../native/NativeWorkflows.ts";
+import type * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { NativeToolkit } from "./tools.ts";
@@ -18,6 +23,37 @@ export const requireOwnerClient = McpInvocationContext.McpInvocationContext.pipe
         )
       : Effect.void,
   ),
+);
+/**
+ * A turn started by a schedule, a webhook or another agent reads untrusted content with nobody
+ * watching, so it may only propose. Fails closed when the run or its message cannot be read.
+ */
+export const requireAttendedTurn = Effect.fn("NativeToolkit.requireAttendedTurn")(
+  function* (caller: {
+    readonly caller: Pick<OrchestrationV2ThreadShell, "id" | "activeRunId"> | undefined;
+    readonly threads: Pick<
+      ThreadManagementService.ThreadManagementService["Service"],
+      "getThreadRecords"
+    >;
+  }) {
+    const thread = caller.caller;
+    const runId = thread?.activeRunId ?? null;
+    if (thread === undefined || runId === null) return yield* NativeWorkflows.reviewRequired();
+    const read = Effect.gen(function* () {
+      const { runs } = yield* caller.threads.getThreadRecords(thread.id, ["runs"], {
+        runIds: [runId],
+      });
+      const run = runs[0];
+      if (run === undefined) return undefined;
+      const { messages } = yield* caller.threads.getThreadRecords(thread.id, ["messages"], {
+        messageIds: [run.userMessageId],
+      });
+      return messages[0];
+    });
+    const message = yield* read.pipe(Effect.orElseSucceed(() => undefined));
+    if (message === undefined || isUnattendedMessage(message))
+      return yield* NativeWorkflows.reviewRequired();
+  },
 );
 export const layer = McpToolAccess.toLayer(
   NativeToolkit,
@@ -39,10 +75,10 @@ export const layer = McpToolAccess.toLayer(
             });
           const context = yield* Effect.context<Effect.Services<typeof check>>();
           const guard = check.pipe(
-            Effect.asVoid,
             Effect.mapError(
               (error) => new NativeWorkflowError({ code: "permission", detail: error.message }),
             ),
+            Effect.flatMap(requireAttendedTurn),
             Effect.provide(context),
           );
           return yield* service.execute(input).pipe(

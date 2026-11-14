@@ -46,6 +46,11 @@ type ProposalRow = {
 const isNativeWorkflowError = Schema.is(NativeWorkflowError);
 const failure = (code: NativeWorkflowError["code"], detail: string) =>
   new NativeWorkflowError({ code, detail });
+export const reviewRequired = () =>
+  failure(
+    "permission",
+    "This action needs user review. Use heiwa_native_propose and tell the user approval is needed.",
+  );
 const storageError = () => failure("failed", "Heiwa could not read or save the workflow state.");
 const guarded = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.mapError((error) => (isNativeWorkflowError(error) ? error : storageError())));
@@ -421,10 +426,7 @@ const make = Effect.gen(function* () {
             action.operation === "trash" ||
             (action.app === "notes" && action.operation === "update" && action.body !== undefined)
           )
-            return yield* failure(
-              "permission",
-              "This action needs user review. Use heiwa_native_propose and tell the user approval is needed.",
-            );
+            return yield* reviewRequired();
           const proposal = yield* propose(action, authority.origin);
           yield* authority.check;
           return yield* approve(proposal.id, true);

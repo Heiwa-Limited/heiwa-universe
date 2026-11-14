@@ -1,8 +1,15 @@
 import { assert, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  MessageId,
+  ProviderInstanceId,
+  RunId,
+  ScheduledTaskId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
-import { requireOwnerClient } from "../mcp/toolkits/native/handlers.ts";
+import { requireAttendedTurn, requireOwnerClient } from "../mcp/toolkits/native/handlers.ts";
 const base = {
   environmentId: EnvironmentId.make("test"),
   requestNamespace: "test",
@@ -50,4 +57,39 @@ it.effect(
         }),
       );
     }),
+);
+
+it.effect("only a turn the user started may apply Apple changes without review", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread");
+    const runId = RunId.make("run");
+    const messageId = MessageId.make("message");
+    const attempt = (
+      message: { readonly createdBy: string; readonly scheduledTaskId?: ScheduledTaskId } | null,
+      activeRunId: RunId | null = runId,
+    ) =>
+      requireAttendedTurn({
+        caller: { id: threadId, activeRunId },
+        threads: {
+          getThreadRecords: (_id, _fields, filter) =>
+            Effect.succeed(
+              (filter?.runIds === undefined
+                ? { messages: message === null ? [] : [{ id: messageId, ...message }] }
+                : { runs: [{ id: runId, userMessageId: messageId }] }) as never,
+            ),
+        },
+      }).pipe(
+        Effect.result,
+        Effect.map((result) => result._tag),
+      );
+    assert.equal(yield* attempt({ createdBy: "user" }), "Success");
+    for (const unattended of [
+      { createdBy: "user", scheduledTaskId: ScheduledTaskId.make("task") },
+      { createdBy: "agent" },
+      { createdBy: "system" },
+      null,
+    ])
+      assert.equal(yield* attempt(unattended), "Failure");
+    assert.equal(yield* attempt({ createdBy: "user" }, null), "Failure");
+  }),
 );

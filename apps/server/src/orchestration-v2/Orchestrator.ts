@@ -70,6 +70,7 @@ import {
   ThreadId,
   TurnItemId,
   TrimmedNonEmptyString,
+  isUnattendedMessage,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { recordThreadOpen } from "@t3tools/shared/paletteSearch";
@@ -2291,11 +2292,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     )
       return;
     const { messages } = projection;
-    const unattended = new Set(
-      messages
-        .filter((message) => message.createdBy !== "user" || message.scheduledTaskId !== undefined)
-        .map((message) => message.id),
-    );
+    const unattended = new Set(messages.filter(isUnattendedMessage).map((message) => message.id));
     const now = yield* DateTime.now;
     const released = held.filter((run) => unattended.has(run.userMessageId));
     if (released.length === 0) return;
