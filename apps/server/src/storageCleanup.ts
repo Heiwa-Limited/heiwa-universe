@@ -504,7 +504,13 @@ const make = Effect.gen(function* () {
         );
       if (result === null) return null;
       if (result.exitCode === 0 || result.exitCode === allowedExitCode) return result;
-      if (result.stderr.toLowerCase().includes("not a git repository")) return null;
+      // Git words a missing repository differently when a worktree's gitfile is stale.
+      const stderr = result.stderr.toLowerCase();
+      if (
+        stderr.includes("not a git repository") ||
+        stderr.includes("does not point to a valid repository")
+      )
+        return null;
       return yield* failure(
         result.stderr.trim().split(/\r?\n/)[0]?.slice(0, 1000) || "command failed",
       );

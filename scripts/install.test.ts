@@ -55,7 +55,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chan
               ...process.env,
               T3CODE_VERSION: "",
               T3CODE_CHANNEL: channel,
-              HEIWA_HOME: NodePath.join(root, "home"),
+              T3CODE_HOME: NodePath.join(root, "home"),
               T3CODE_INSTALL_BIN_DIR: NodePath.join(root, "bin"),
               // A wrong version must fail here instead of downloading a real release.
               T3CODE_RELEASE_BASE_URL: origin,

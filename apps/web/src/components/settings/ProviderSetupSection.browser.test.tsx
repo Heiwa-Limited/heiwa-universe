@@ -278,7 +278,7 @@ describe("Antigravity setup", () => {
       provider: { ...provider, installed: false },
       binaryPath: "/missing/antigravity",
     });
-    expect(screen.button("Sign in")?.disabled).toBe(true);
+    expect(screen.button("Sign in with Google")?.disabled).toBe(true);
     expect(setup.startAuth).not.toHaveBeenCalled();
   });
 });
