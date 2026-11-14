@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
 /** Civil-date round trip rejects Date.parse's silent normalization of impossible days. */
@@ -5,7 +6,10 @@ export function isNativeInstant(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return false;
   const civil = value.slice(0, 19);
   const parsed = Date.parse(`${civil}Z`);
-  if (!Number.isFinite(parsed) || new Date(parsed).toISOString().slice(0, 19) !== civil)
+  if (
+    !Number.isFinite(parsed) ||
+    DateTime.formatIso(DateTime.makeUnsafe(parsed)).slice(0, 19) !== civil
+  )
     return false;
   const zone = value.slice(19);
   return zone === "Z" || (Number(zone.slice(1, 3)) <= 23 && Number(zone.slice(4, 6)) <= 59);

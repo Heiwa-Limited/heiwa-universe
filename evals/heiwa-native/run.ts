@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off - standalone eval script that writes result files.
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Tool } from "effect/ai";
@@ -7,11 +8,13 @@ import {
   LOCAL_AGENT_INSTRUCTIONS,
   runLocalTurn,
 } from "../../apps/server/src/provider/local/LocalAgent.ts";
-const arg = (key: string) => process.argv[process.argv.indexOf(key) + 1];
-const out = process.argv.includes("--out") ? resolve(arg("--out")) : undefined;
-if (!out) throw new Error("--out <directory> is required");
-const model = process.argv.includes("--model") ? arg("--model") : "gemma4:latest";
-const only = process.argv.includes("--case") ? arg("--case") : undefined;
+const arg = (key: string) =>
+  process.argv.includes(key) ? process.argv[process.argv.indexOf(key) + 1] : undefined;
+const outArg = arg("--out");
+if (!outArg) throw new Error("--out <directory> is required");
+const out = resolve(outArg);
+const model = arg("--model") ?? "gemma4:latest";
+const only = arg("--case");
 const names = new Set([
   "heiwa_workflow",
   "heiwa_native_read",
