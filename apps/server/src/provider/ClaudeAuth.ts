@@ -46,9 +46,7 @@ export interface ClaudeAuthOptions {
   /** Accounts are per config directory, so instances sharing one share a login. */
   readonly configDir: string;
   readonly cwd: string;
-  readonly command: (
-    args: ReadonlyArray<string>,
-  ) => Effect.Effect<{
+  readonly command: (args: ReadonlyArray<string>) => Effect.Effect<{
     readonly command: string;
     readonly args: ReadonlyArray<string>;
     readonly env: NodeJS.ProcessEnv;

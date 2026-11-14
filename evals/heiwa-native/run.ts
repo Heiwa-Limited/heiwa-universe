@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off - standalone eval script that writes result files.
-import { mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 import { Tool } from "effect/ai";
 import { NativeToolkit } from "../../apps/server/src/mcp/toolkits/native/tools.ts";
 import { advertisedJsonSchema } from "../../apps/server/src/mcp/advertisedJsonSchema.ts";
@@ -12,7 +12,7 @@ const arg = (key: string) =>
   process.argv.includes(key) ? process.argv[process.argv.indexOf(key) + 1] : undefined;
 const outArg = arg("--out");
 if (!outArg) throw new Error("--out <directory> is required");
-const out = resolve(outArg);
+const out = NodePath.resolve(outArg);
 const model = arg("--model") ?? "gemma4:latest";
 const only = arg("--case");
 const names = new Set([
@@ -135,9 +135,9 @@ for (const c of cases.filter((value) => only === undefined || value.id === only)
       error,
     });
   }
-await mkdir(out, { recursive: true });
-await writeFile(
-  resolve(out, "results.json"),
+await NodeFSP.mkdir(out, { recursive: true });
+await NodeFSP.writeFile(
+  NodePath.resolve(out, "results.json"),
   JSON.stringify(
     {
       model,

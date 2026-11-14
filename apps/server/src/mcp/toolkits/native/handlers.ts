@@ -45,14 +45,12 @@ export const layer = McpToolAccess.toLayer(
             ),
             Effect.provide(context),
           );
-          return yield* service
-            .execute(input)
-            .pipe(
-              Effect.provideService(NativeWorkflows.NativeExecutionAuthority, {
-                origin: scope.requestNamespace,
-                check: guard,
-              }),
-            );
+          return yield* service.execute(input).pipe(
+            Effect.provideService(NativeWorkflows.NativeExecutionAuthority, {
+              origin: scope.requestNamespace,
+              check: guard,
+            }),
+          );
         }),
       ),
       heiwa_native_resolve: McpToolAccess.writesEnvironment((input) =>

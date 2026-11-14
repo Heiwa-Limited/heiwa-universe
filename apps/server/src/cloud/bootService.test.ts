@@ -766,9 +766,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       const plan = yield* service.install();
 
       expect(
-        plan.unitPath.endsWith(
-          path.join("Library", "LaunchAgents", "ltd.heiwa.service.plist"),
-        ),
+        plan.unitPath.endsWith(path.join("Library", "LaunchAgents", "ltd.heiwa.service.plist")),
       ).toBe(true);
       expect(yield* fs.readFileString(plan.unitPath)).toContain(
         `    <key>PATH</key>\n    <string>${macInstallerPath}:/usr/local/bin:/usr/sbin:/sbin</string>`,
