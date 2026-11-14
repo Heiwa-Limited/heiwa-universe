@@ -6,6 +6,7 @@ import {
   NativeApp,
   NativeProposal,
   NativeResource,
+  NativeSource,
   NativeWriteMode,
   NativeWorkflowError,
   type NativeReadInput,
@@ -30,6 +31,7 @@ const decodeResources = Schema.decodeUnknownEffect(
 );
 const decodeIds = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(Schema.String)));
 const decodeAction = Schema.decodeUnknownEffect(Schema.fromJsonString(NativeAction));
+const decodeSource = Schema.decodeUnknownEffect(Schema.fromJsonString(NativeSource));
 const decodeSnapshot = Schema.decodeUnknownEffect(Schema.fromJsonString(NativeHost.NativeSnapshot));
 const decodeRecord = Schema.decodeUnknownEffect(
   Schema.fromJsonString(NativeProposal.fields.result),
@@ -43,6 +45,7 @@ type ProposalRow = {
   result_json: string | null;
   detail: string | null;
   resource_json: string | null;
+  source_json: string | null;
   origin: string;
 };
 const isNativeWorkflowError = Schema.is(NativeWorkflowError);
@@ -65,6 +68,7 @@ const decodeRow = Effect.fn("NativeWorkflows.decodeRow")(function* (row: Proposa
       row.expected_json === null
         ? null
         : NativeHost.nativeRecord(yield* decodeSnapshot(row.expected_json)),
+    source: row.source_json === null ? null : yield* decodeSource(row.source_json),
     status: row.status,
     createdAt: row.created_at,
     result: row.result_json === null ? null : yield* decodeRecord(row.result_json),
@@ -277,8 +281,25 @@ const make = Effect.gen(function* () {
       );
     return raw;
   });
+  // The stored title and sender come from the item itself, so an agent cannot invent where a change came from.
+  const findSource = Effect.fn("NativeWorkflows.findSource")(function* (
+    ref: NonNullable<(typeof NativeAction.Type)["source"]>,
+  ) {
+    if (!(yield* selected(ref.app)).includes(ref.resourceId))
+      return yield* failure("selection", "The source item is outside what the user selected.");
+    const raw = yield* host
+      .inspect(ref.app, ref.resourceId, ref.id)
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (raw === undefined)
+      return yield* failure("stale", "The source item is unavailable. Read it again.");
+    return {
+      ...ref,
+      title: raw.title,
+      ...(raw.sender === undefined ? {} : { sender: raw.sender }),
+    } satisfies typeof NativeSource.Type;
+  });
   const propose = Effect.fn("NativeWorkflows.propose")(function* (
-    action: typeof NativeAction.Type,
+    { source: sourceRef, ...action }: typeof NativeAction.Type,
     origin = "owner",
   ) {
     if (!validateAction(action))
@@ -293,14 +314,16 @@ const make = Effect.gen(function* () {
     if (!resource?.writable)
       return yield* failure("selection", "This resource is missing or read only.");
     const expected = yield* findExpected(action);
+    const source = sourceRef === undefined ? null : yield* findSource(sourceRef);
     const id = NodeCrypto.randomUUID(),
       createdAt = DateTime.formatIso(yield* DateTime.now);
-    yield* sql`INSERT INTO heiwa_native_proposals (id, action_json, expected_json, resource_json, origin, status, created_at) VALUES (${id}, ${encodeJson(action)}, ${expected === null ? null : encodeJson(expected)}, ${encodeJson(resource)}, ${origin}, 'pending', ${createdAt})`;
+    yield* sql`INSERT INTO heiwa_native_proposals (id, action_json, expected_json, resource_json, source_json, origin, status, created_at) VALUES (${id}, ${encodeJson(action)}, ${expected === null ? null : encodeJson(expected)}, ${encodeJson(resource)}, ${source === null ? null : encodeJson(source)}, ${origin}, 'pending', ${createdAt})`;
     return {
       id,
       action,
       resource,
       before: expected === null ? null : NativeHost.nativeRecord(expected),
+      source,
       status: "pending" as const,
       createdAt,
       result: null,

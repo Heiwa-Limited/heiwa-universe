@@ -81,6 +81,14 @@ export const NativeReadResult = Schema.Struct({
   records: Schema.Array(NativeRecord),
   truncated: Schema.Boolean,
 });
+/** The item a change answers, such as the email an event or a reply came from. */
+const NativeSourceRef = Schema.Struct({ app: NativeApp, resourceId: Id, id: Id });
+export const NativeSource = Schema.Struct({
+  ...NativeSourceRef.fields,
+  title: Text,
+  sender: Schema.optional(Text),
+});
+export type NativeSource = typeof NativeSource.Type;
 export const NativeAction = Schema.Struct({
   app: NativeApp,
   operation: Schema.Literals(["create", "update", "append", "complete", "trash"]),
@@ -97,6 +105,12 @@ export const NativeAction = Schema.Struct({
   allDay: Schema.optional(Schema.Boolean),
   /** Mail drafts only. Heiwa saves drafts; sending stays in Mail. */
   recipients: Schema.optional(Schema.Array(Email).check(Schema.isMaxLength(20))),
+  source: Schema.optional(
+    NativeSourceRef.annotate({
+      description:
+        "Item this change answers (app, resourceId, id from a read), such as the email an event or reply came from.",
+    }),
+  ),
 });
 export type NativeAction = typeof NativeAction.Type;
 export const NativeProposal = Schema.Struct({
@@ -104,6 +118,7 @@ export const NativeProposal = Schema.Struct({
   action: NativeAction,
   resource: Schema.NullOr(NativeResource),
   before: Schema.NullOr(NativeRecord),
+  source: Schema.NullOr(NativeSource),
   status: Schema.Literals([
     "pending",
     "applying",

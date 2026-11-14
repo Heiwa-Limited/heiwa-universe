@@ -9,7 +9,7 @@ import { resolveHour12 } from "../../timestampFormat";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsGroup } from "../settings/SettingsGroup";
 import { Button } from "../ui/button";
-import { proposalHeading, proposalWhen } from "./approvals.logic";
+import { groupBySource, proposalHeading, proposalWhen } from "./approvals.logic";
 
 function ProposalContent({ proposal }: { proposal: NativeProposal }) {
   const action = proposal.action;
@@ -134,6 +134,18 @@ export function ProposalReviewList({
       .then(settle)
       .finally(() => setBusy(null));
   };
+  // One at a time, stopping at the first that is not applied: each is verified on its own.
+  const approveAll = (key: string, group: ReadonlyArray<NativeProposal>) => {
+    if (busy !== null) return;
+    setBusy(key);
+    void (async () => {
+      for (const proposal of group) {
+        const result = await approve({ environmentId, input: { id: proposal.id, approve: true } });
+        settle(result);
+        if (result._tag !== "Success" || result.value.status !== "applied") return;
+      }
+    })().finally(() => setBusy(null));
+  };
   const disabled = busy !== null;
   return (
     <div className="space-y-4">
@@ -142,74 +154,105 @@ export function ProposalReviewList({
           {failure}
         </p>
       ) : null}
-      {proposals.map((proposal) => (
-        <SettingsGroup key={proposal.id} className="p-4">
-          <ProposalContent proposal={proposal} />
-          <div className="mt-4 flex items-center gap-2">
-            {proposal.status === "pending" ? (
-              <>
-                <Button
-                  size="sm"
-                  disabled={disabled}
-                  onClick={() =>
-                    whileBusy(proposal.id, () =>
-                      approve({ environmentId, input: { id: proposal.id, approve: true } }),
-                    )
-                  }
-                >
-                  Approve change
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={disabled}
-                  onClick={() =>
-                    whileBusy(proposal.id, () =>
-                      approve({ environmentId, input: { id: proposal.id, approve: false } }),
-                    )
-                  }
-                >
-                  Reject
-                </Button>
-              </>
-            ) : (
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  {proposal.status === "applying"
-                    ? "This change started. Inspect the native app before taking another action."
-                    : "Outcome uncertain. Inspect the native app; Heiwa will not repeat this change."}
-                </p>
-                <label className="block text-sm">
-                  What did you verify in the Apple app?
-                  <textarea
-                    className="mt-2 block w-full rounded-md border bg-transparent p-2"
-                    maxLength={1000}
-                    value={notes[proposal.id] ?? ""}
-                    onChange={(event) =>
-                      setNotes((current) => ({ ...current, [proposal.id]: event.target.value }))
-                    }
-                  />
-                </label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={disabled || !notes[proposal.id]?.trim()}
-                  onClick={() =>
-                    whileBusy(proposal.id, () =>
-                      resolve({
-                        environmentId,
-                        input: { id: proposal.id, note: notes[proposal.id]!.trim() },
-                      }),
-                    )
-                  }
-                >
-                  Record checked outcome
-                </Button>
+      {groupBySource(proposals).map((group) => {
+        const reviewable = group.proposals.filter((proposal) => proposal.status === "pending");
+        return (
+          <SettingsGroup key={group.key}>
+            {group.source ? (
+              <div className="flex items-center justify-between gap-4 p-4">
+                <div className="min-w-0 text-sm">
+                  <p className="truncate font-medium">{group.source.title}</p>
+                  {group.source.sender ? (
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      From {group.source.sender}
+                    </p>
+                  ) : null}
+                </div>
+                {reviewable.length > 1 ? (
+                  <Button
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => approveAll(group.key, reviewable)}
+                  >
+                    Approve all {reviewable.length}
+                  </Button>
+                ) : null}
               </div>
-            )}
-          </div>
-        </SettingsGroup>
-      ))}
+            ) : null}
+            {group.proposals.map((proposal) => (
+              <div key={proposal.id} className="p-4">
+                <ProposalContent proposal={proposal} />
+                <div className="mt-4 flex items-center gap-2">
+                  {proposal.status === "pending" ? (
+                    <>
+                      <Button
+                        size="sm"
+                        disabled={disabled}
+                        onClick={() =>
+                          whileBusy(proposal.id, () =>
+                            approve({ environmentId, input: { id: proposal.id, approve: true } }),
+                          )
+                        }
+                      >
+                        Approve change
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={disabled}
+                        onClick={() =>
+                          whileBusy(proposal.id, () =>
+                            approve({ environmentId, input: { id: proposal.id, approve: false } }),
+                          )
+                        }
+                      >
+                        Reject
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        {proposal.status === "applying"
+                          ? "This change started. Inspect the native app before taking another action."
+                          : "Outcome uncertain. Inspect the native app; Heiwa will not repeat this change."}
+                      </p>
+                      <label className="block text-sm">
+                        What did you verify in the Apple app?
+                        <textarea
+                          className="mt-2 block w-full rounded-md border bg-transparent p-2"
+                          maxLength={1000}
+                          value={notes[proposal.id] ?? ""}
+                          onChange={(event) =>
+                            setNotes((current) => ({
+                              ...current,
+                              [proposal.id]: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={disabled || !notes[proposal.id]?.trim()}
+                        onClick={() =>
+                          whileBusy(proposal.id, () =>
+                            resolve({
+                              environmentId,
+                              input: { id: proposal.id, note: notes[proposal.id]!.trim() },
+                            }),
+                          )
+                        }
+                      >
+                        Record checked outcome
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </SettingsGroup>
+        );
+      })}
       {receipt ? (
         <div role="status" className="text-sm">
           <p className="font-medium">{receiptTitle(receipt)}</p>
