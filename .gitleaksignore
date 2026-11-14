@@ -1,3 +1,9 @@
+# Secret-scan exceptions. Every entry is a reviewed non-secret.
+# Do not add a live credential here: rotate it and remove it instead.
+
+# --- Retired Tauri and Rust tree (history before the Electron rebuild). ---
+# Carried over unchanged from that tree's .gitleaksignore so full-history
+# scans stay green.
 # Reviewed gitleaks baseline — triaged 2026-08-03, 46 historical findings, 0 active secrets.
 # Classes: JWT/test fixtures + redaction vectors; doc example keys (Figma/Cloudflare skills);
 # test tokens (operator_api.rs); fake auditor fixture (sk-live-1234...); dead legacy local
@@ -75,3 +81,109 @@ fb08594d1ff04d85a9267be98e6fdb7aae0d810b:apps/heiwa_shell/tests/operator_api.rs:
 be2a81c801a31168773188ec4a935601f42c8926:apps/heiwa_shell/src/cmd/app.rs:generic-api-key:6638
 be2a81c801a31168773188ec4a935601f42c8926:apps/heiwa_shell/src/cmd/app.rs:generic-api-key:6774
 27219da1b04b9ea0b55fb97c6d97b4266ad97029:.gitleaksignore:generic-api-key:10
+
+# --- Upstream T3 Code import. ---
+# Findings inherited unchanged from the upstream T3 Code import (759d83fd).
+# That commit differs from public upstream cb9629e6 only by NOTICE, so each
+# entry is upstream's own already-public fixture or example value.
+# Scanned with gitleaks 8.30.1 on 2026-11-13. Do not add Heiwa findings here.
+
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.env.example:generic-api-key:11
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.env.example:generic-api-key:9
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/examples/cloudflare-dev/src/EffectWorker.ts:generic-api-key:25
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/examples/cloudflare-dev/src/NotifyWorkflow.ts:generic-api-key:11
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/examples/cloudflare-dev/test/integ.test.ts:generic-api-key:257
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/src/AWS/ACMPCA/CertificateAuthority.ts:generic-api-key:237
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/src/AWS/WAFv2/APIKeys.ts:generic-api-key:64
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/src/Cloudflare/Auth/OAuthClient.ts:generic-api-key:9
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/src/Cloudflare/Workers/SecretKey.ts:generic-api-key:149
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/src/GCP/AccessContextManager/GcpUserAccessBinding.ts:generic-api-key:115
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/src/GCP/AccessContextManager/GcpUserAccessBinding.ts:generic-api-key:127
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/src/GCP/FirebaseAppCheck/AppsDebugToken.ts:generic-api-key:106
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/ACM/fixtures/import-cert.ts:private-key:29
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/Amplify/Branch.test.ts:generic-api-key:19
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/EC2/fixtures/client-vpn-certificate.ts:private-key:27
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/ECS/ServiceDomain.test.ts:private-key:45
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/ELBv2/fixtures/certs.ts:private-key:143
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/ELBv2/fixtures/certs.ts:private-key:35
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/ELBv2/fixtures/certs.ts:private-key:89
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/IAM/fixtures.ts:private-key:19
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/PaymentCryptography/handler.ts:generic-api-key:104
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/PaymentCryptography/handler.ts:generic-api-key:77
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/AWS/PaymentCryptography/handler.ts:generic-api-key:90
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Auth/Migration.test.ts:generic-api-key:106
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Auth/fixtures/v0-home/credentials/work/cf-stored.json:generic-api-key:3
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/CustomCertificate/fixtures/key1.pem:private-key:1
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/CustomCertificate/fixtures/key2.pem:private-key:1
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/Dns/ZoneTransferPeer.test.ts:generic-api-key:20
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/Dns/ZoneTransferTsig.test.ts:generic-api-key:20
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/Dns/ZoneTransferTsig.test.ts:generic-api-key:22
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/MtlsCertificate/fixtures/certs.ts:private-key:86
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/OriginTlsClientAuth/fixtures/certs.ts:private-key:143
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/OriginTlsClientAuth/fixtures/certs.ts:private-key:196
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/OriginTlsClientAuth/fixtures/certs.ts:private-key:249
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/OriginTlsClientAuth/fixtures/certs.ts:private-key:302
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/OriginTlsClientAuth/fixtures/certs.ts:private-key:362
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/OriginTlsClientAuth/fixtures/certs.ts:private-key:37
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/OriginTlsClientAuth/fixtures/certs.ts:private-key:415
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/OriginTlsClientAuth/fixtures/certs.ts:private-key:468
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/OriginTlsClientAuth/fixtures/certs.ts:private-key:90
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Cloudflare/Workers/fixtures/secret-key/worker.ts:generic-api-key:9
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Docker/Docker.test.ts:generic-api-key:344
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Fly/Certificate.test.ts:private-key:105
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Fly/Certificate.test.ts:private-key:157
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Fly/Certificate.test.ts:private-key:53
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/AccessContextManager/GcpUserAccessBinding.test.ts:generic-api-key:11
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/AppEngine/fixtures/cert.ts:private-key:29
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/AppEngine/fixtures/cert.ts:private-key:77
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/CertificateManager/Certificate.test.ts:private-key:38
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/CertificateManager/Certificate.test.ts:private-key:88
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/CertificateManager/CertificateMapEntry.test.ts:private-key:38
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/Compute/fixtures/https-proxy-cert.ts:private-key:130
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/Compute/fixtures/https-proxy-cert.ts:private-key:59
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/DataMigration/ConnectionProfile.test.ts:generic-api-key:51
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/DataMigration/MigrationJob.test.ts:generic-api-key:57
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/DataMigration/MigrationJob.test.ts:generic-api-key:69
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/Datastream/Stream.test.ts:generic-api-key:54
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/SQL/User.test.ts:generic-api-key:121
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/SQL/User.test.ts:generic-api-key:149
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/GCP/SasPortal/common.ts:jwt:26
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Hetzner/Certificate.test.ts:private-key:107
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/Hetzner/Certificate.test.ts:private-key:56
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/alchemy/test/KeyPair.test.ts:private-key:20
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/cloudflare-runtime/src/core/test/Docker.test.ts:generic-api-key:65
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/cloudflare-runtime/src/core/test/bindings/SecretKey.test.ts:generic-api-key:8
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/packages/cloudflare-runtime/src/vite/test/websockets.test.ts:generic-api-key:110
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/website/src/content/docs/cli/profile.mdx:generic-api-key:190
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/alchemy-effect/website/src/content/docs/fly/tutorial/part-4.mdx:curl-auth-header:102
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/effect-smol/packages/effect/HTTPAPI.md:curl-auth-header:1047
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/effect-smol/packages/effect/src/Config.ts:generic-api-key:1411
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/effect-smol/packages/effect/test/eventlog/EventLogIdentityDerivation.test.ts:generic-api-key:6
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/effect-smol/packages/platform/bun/test/BunHttpServer.test.ts:generic-api-key:40
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/effect-smol/packages/platform/bun/test/BunHttpServer.test.ts:generic-api-key:87
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/effect-smol/packages/platform/deno/test/fixtures/tls/key.pem:private-key:1
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/effect-smol/packages/platform/node/test/NodeHttpServer.test.ts:generic-api-key:1030
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/effect-smol/packages/platform/node/test/NodeHttpServer.test.ts:generic-api-key:1078
+759d83fd04e5d6561239e8ec87525b2f47eab25f:.repos/effect-smol/packages/platform/node/test/fixtures/tls/key.pem:private-key:1
+759d83fd04e5d6561239e8ec87525b2f47eab25f:apps/server/src/auth/PairingGrantStore.ts:generic-api-key:254
+759d83fd04e5d6561239e8ec87525b2f47eab25f:apps/server/src/cloud/CliTokenManager.test.ts:generic-api-key:21
+759d83fd04e5d6561239e8ec87525b2f47eab25f:apps/server/src/cloud/publicConfig.test.ts:generic-api-key:43
+759d83fd04e5d6561239e8ec87525b2f47eab25f:apps/server/src/htmlRender/HtmlRender.test.ts:generic-api-key:148
+759d83fd04e5d6561239e8ec87525b2f47eab25f:apps/server/src/httpResponseErrorGuard.test.ts:generic-api-key:103
+759d83fd04e5d6561239e8ec87525b2f47eab25f:apps/server/src/httpResponseErrorGuard.test.ts:generic-api-key:42
+759d83fd04e5d6561239e8ec87525b2f47eab25f:apps/server/src/outboundHttp.test.ts:private-key:22
+759d83fd04e5d6561239e8ec87525b2f47eab25f:infra/relay/src/hooks/HeldHooks.test.ts:generic-api-key:19
+759d83fd04e5d6561239e8ec87525b2f47eab25f:infra/relay/src/hooks/HeldHooks.test.ts:generic-api-key:20
+759d83fd04e5d6561239e8ec87525b2f47eab25f:infra/relay/src/hooks/HookForwarder.test.ts:generic-api-key:56
+759d83fd04e5d6561239e8ec87525b2f47eab25f:infra/relay/src/http/Api.test.ts:generic-api-key:1079
+759d83fd04e5d6561239e8ec87525b2f47eab25f:infra/relay/src/previewStages.test.ts:generic-api-key:11
+759d83fd04e5d6561239e8ec87525b2f47eab25f:infra/relay/src/previewStages.test.ts:generic-api-key:42
+759d83fd04e5d6561239e8ec87525b2f47eab25f:infra/relay/src/previewTunnelSweep.test.ts:generic-api-key:10
+759d83fd04e5d6561239e8ec87525b2f47eab25f:infra/task-cache/src/NativeClients.test.ts:generic-api-key:6
+759d83fd04e5d6561239e8ec87525b2f47eab25f:packages/provider-opencode/src/server/status.test.ts:generic-api-key:120
+759d83fd04e5d6561239e8ec87525b2f47eab25f:packages/provider-opencode/src/server/status.test.ts:generic-api-key:121
+759d83fd04e5d6561239e8ec87525b2f47eab25f:packages/provider-opencode/src/server/status.test.ts:generic-api-key:122
+759d83fd04e5d6561239e8ec87525b2f47eab25f:packages/provider-pi/src/server/textGeneration.test.ts:generic-api-key:103
+759d83fd04e5d6561239e8ec87525b2f47eab25f:packages/shared/src/keybindings.ts:generic-api-key:182
+759d83fd04e5d6561239e8ec87525b2f47eab25f:packages/shared/src/keybindings.ts:generic-api-key:213
+759d83fd04e5d6561239e8ec87525b2f47eab25f:packages/shared/src/keybindings.ts:generic-api-key:214
