@@ -1,8 +1,15 @@
 import { assert, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  MessageId,
+  ProviderInstanceId,
+  RunId,
+  ScheduledTaskId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
-import { requireOwnerClient } from "../mcp/toolkits/native/handlers.ts";
+import { requireAttendedTurn, requireOwnerClient } from "../mcp/toolkits/native/handlers.ts";
 const base = {
   environmentId: EnvironmentId.make("test"),
   requestNamespace: "test",
@@ -50,4 +57,64 @@ it.effect(
         }),
       );
     }),
+);
+
+it.effect("only a turn the user typed may apply Apple changes without review", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("thread");
+    const runId = RunId.make("run");
+    const messageId = MessageId.make("message");
+    const typed = { createdBy: "user", creationSource: "web" } as const;
+    const attempt = (
+      message: {
+        readonly createdBy: string;
+        readonly creationSource: string;
+        readonly scheduledTaskId?: ScheduledTaskId;
+      } | null,
+      options: {
+        readonly activeRunId?: RunId | null;
+        readonly subagent?: boolean;
+        readonly backgroundKind?: "subagent" | "command";
+      } = {},
+    ) =>
+      requireAttendedTurn(
+        {
+          caller: {
+            id: threadId,
+            activeRunId: options.activeRunId === undefined ? runId : options.activeRunId,
+            pendingBackgroundTasks:
+              options.backgroundKind === undefined
+                ? []
+                : [{ taskId: "task", kind: options.backgroundKind }],
+          },
+          threads: {
+            getThreadRecords: (_id, _fields, filter) =>
+              Effect.succeed(
+                (filter?.runIds === undefined
+                  ? { messages: message === null ? [] : [{ id: messageId, ...message }] }
+                  : { runs: [{ id: runId, userMessageId: messageId }] }) as never,
+              ),
+          },
+        },
+        options.subagent === true,
+      ).pipe(
+        Effect.result,
+        Effect.map((result) => result._tag),
+      );
+    assert.equal(yield* attempt(typed), "Success");
+    assert.equal(yield* attempt({ ...typed, creationSource: "mobile" }), "Success");
+    assert.equal(yield* attempt(typed, { backgroundKind: "command" }), "Success");
+    for (const unattended of [
+      { ...typed, scheduledTaskId: ScheduledTaskId.make("task") },
+      // A usage-limit resume: the server writes it and stamps it `user`.
+      { createdBy: "user", creationSource: "server" },
+      { createdBy: "agent", creationSource: "mcp" },
+      { createdBy: "system", creationSource: "server" },
+      null,
+    ])
+      assert.equal(yield* attempt(unattended), "Failure");
+    assert.equal(yield* attempt(typed, { activeRunId: null }), "Failure");
+    assert.equal(yield* attempt(typed, { subagent: true }), "Failure");
+    assert.equal(yield* attempt(typed, { backgroundKind: "subagent" }), "Failure");
+  }),
 );
