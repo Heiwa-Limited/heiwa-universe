@@ -4,7 +4,9 @@ import { NativeWorkflowError } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
 import * as NativeHost from "./NativeHost.ts";
 import * as NativeWorkflows from "./NativeWorkflows.ts";
 import authorityMigration from "../persistence/Migrations/077_NativeWorkflowAuthority.ts";
@@ -169,6 +171,22 @@ describe("native workflow authority", () => {
       assert.equal((yield* service.approve(proposal.id, true)).status, "acknowledged");
       assert.equal(f.writes(), 1);
     }).pipe(Effect.provide(f.layer));
+  });
+  it.effect("streams the pending list as proposals arrive and are answered", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const service = yield* selected;
+      const seen = yield* Queue.unbounded<number>();
+      yield* service.subscribeStatus.pipe(
+        Stream.runForEach((status) => Queue.offer(seen, status.pending.length)),
+        Effect.forkScoped,
+      );
+      assert.equal(yield* Queue.take(seen), 0);
+      const proposal = yield* service.propose(create);
+      assert.equal(yield* Queue.take(seen), 1);
+      yield* service.approve(proposal.id, false);
+      assert.equal(yield* Queue.take(seen), 0);
+    }).pipe(Effect.scoped, Effect.provide(f.layer));
   });
   it.effect("requires exact current revision before staging an edit", () => {
     const f = fixture();

@@ -516,6 +516,7 @@ export const WS_METHODS = {
   localModels: "heiwa.local.models",
   localConnect: "heiwa.local.connect",
   nativeStatus: "heiwa.native.status",
+  nativeSubscribe: "heiwa.native.subscribe",
   nativeInventory: "heiwa.native.inventory",
   nativeSelect: "heiwa.native.select",
   nativeRead: "heiwa.native.read",
@@ -669,6 +670,12 @@ const WsNativeStatusRpc = Rpc.make(WS_METHODS.nativeStatus, {
   payload: Schema.Struct({}),
   success: NativeStatus,
   error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+});
+const WsNativeSubscribeRpc = Rpc.make(WS_METHODS.nativeSubscribe, {
+  payload: Schema.Struct({}),
+  success: NativeStatus,
+  error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+  stream: true,
 });
 const WsNativeInventoryRpc = Rpc.make(WS_METHODS.nativeInventory, {
   payload: NativeInventoryInput,
@@ -2038,6 +2045,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsLocalModelsRpc,
   WsLocalConnectRpc,
   WsNativeStatusRpc,
+  WsNativeSubscribeRpc,
   WsNativeInventoryRpc,
   WsNativeSelectRpc,
   WsNativeReadRpc,

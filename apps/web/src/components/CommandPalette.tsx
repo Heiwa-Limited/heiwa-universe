@@ -54,6 +54,7 @@ import {
   ArrowLeftIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
+  InboxIcon,
   CheckIcon,
   ChevronRightIcon,
   CornerLeftUpIcon,
@@ -1497,6 +1498,17 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:approvals",
+    searchTerms: ["approvals", "approve", "review", "inbox", "pending", "apple", "waiting"],
+    title: "Open approvals",
+    icon: <InboxIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/approvals" });
+    },
+  });
 
   actionItems.push({
     kind: "action",

@@ -2,14 +2,24 @@ import { WS_METHODS } from "@t3tools/contracts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
 } from "@t3tools/client-runtime/state/runtime";
 import { connectionAtomRuntime } from "../connection/runtime";
+import { environmentAtomList } from "./environmentAtomList";
 export const nativeStatus = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
   label: "heiwa:native:status",
   tag: WS_METHODS.nativeStatus,
   staleTimeMs: 5_000,
   idleTtlMs: 60_000,
 });
+export const nativeStatusLive = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
+  label: "heiwa:native:status:live",
+  tag: WS_METHODS.nativeSubscribe,
+});
+export const nativeStatusListAtom = environmentAtomList(
+  "heiwa:native:status:list",
+  (environmentId) => nativeStatusLive({ environmentId, input: {} }),
+);
 export const nativeInventory = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "heiwa:native:inventory",
   tag: WS_METHODS.nativeInventory,

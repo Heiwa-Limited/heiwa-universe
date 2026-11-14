@@ -1,4 +1,10 @@
-import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  ChartNoAxesColumnIcon,
+  InboxIcon,
+  SettingsIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -14,6 +20,7 @@ import {
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { cn } from "../../lib/utils";
 import { usePullRequestsSupported } from "../../state/environments";
+import { useApprovals } from "../approvals/useApprovals";
 import { HeiwaWordmark } from "../HeiwaWordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
@@ -210,6 +217,31 @@ function SidebarUtilityItem({
   );
 }
 
+function SidebarApprovalsItem({ onNavigate }: { readonly onNavigate: () => void }) {
+  const navigate = useNavigate();
+  const { count } = useApprovals();
+  return (
+    <SidebarUtilityItem
+      icon={
+        <span className="relative">
+          <InboxIcon />
+          {count > 0 ? (
+            <span
+              aria-hidden
+              className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-warning"
+            />
+          ) : null}
+        </span>
+      }
+      label={count > 0 ? `Approvals (${count} waiting)` : "Approvals"}
+      onClick={() => {
+        onNavigate();
+        void navigate({ to: "/approvals" });
+      }}
+    />
+  );
+}
+
 const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
@@ -275,6 +307,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Usage"
             onClick={handleUsageClick}
           />
+          <SidebarApprovalsItem onNavigate={closeMobileSidebar} />
         </>
       )}
       <SidebarThreadUndoNotice />

@@ -35,6 +35,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.localModels]: "local-inference",
   [WS_METHODS.localConnect]: "local-inference",
   [WS_METHODS.nativeStatus]: "native",
+  [WS_METHODS.nativeSubscribe]: "native",
   [WS_METHODS.nativeInventory]: "native",
   [WS_METHODS.nativeSelect]: "native",
   [WS_METHODS.nativeRead]: "native",
