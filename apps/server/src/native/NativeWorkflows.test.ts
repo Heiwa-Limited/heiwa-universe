@@ -312,6 +312,21 @@ it("daily brief uses the Mac day boundary across daylight-saving changes", () =>
   );
 });
 
+it("gives a timed event without an end one hour in its own time zone", () => {
+  const event = {
+    app: "calendar" as const,
+    operation: "create" as const,
+    resourceId: "calendar-1",
+    title: "Dinner",
+    start: "2026-11-19T23:30:00-05:00",
+  };
+  assert.equal(NativeWorkflows.withDefaultEnd(event).end, "2026-11-20T00:30:00-05:00");
+  assert.equal(
+    NativeWorkflows.withDefaultEnd({ ...event, end: "2026-11-20T02:00:00-05:00" }).end,
+    "2026-11-20T02:00:00-05:00",
+  );
+  assert.isUndefined(NativeWorkflows.withDefaultEnd({ ...event, allDay: true }).end);
+});
 it("validates reminder due dates and prevents cross-app reminder metadata", () => {
   assert.isTrue(NativeWorkflows.validateAction({ ...create, due: "2026-11-02", priority: 1 }));
   assert.isTrue(NativeWorkflows.validateAction({ ...create, due: null }));

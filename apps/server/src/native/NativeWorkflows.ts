@@ -158,6 +158,30 @@ export const validateAction = (action: typeof NativeAction.Type) => {
   return true;
 };
 
+/** Local models often give an event only its start. The user still reviews the hour it gets. */
+export const withDefaultEnd = (action: typeof NativeAction.Type): typeof NativeAction.Type => {
+  const { start } = action;
+  if (
+    action.app !== "calendar" ||
+    action.operation !== "create" ||
+    action.allDay === true ||
+    action.end !== undefined ||
+    start === undefined ||
+    !isNativeInstant(start)
+  )
+    return action;
+  const zone = start.slice(19);
+  const offsetMinutes =
+    zone === "Z"
+      ? 0
+      : (zone.startsWith("-") ? -1 : 1) *
+        (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(4, 6)));
+  const civil = DateTime.formatIso(
+    DateTime.makeUnsafe(Date.parse(start) + (60 + offsetMinutes) * 60_000),
+  ).slice(0, 19);
+  return { ...action, end: `${civil}${zone}` };
+};
+
 const mailAccount = (url: string) => /^[a-z]+:\/\/[^/]+\//.exec(url)?.[0];
 export const sameMailAccount = (a: string, b: string) =>
   mailAccount(a) !== undefined && mailAccount(a) === mailAccount(b);
@@ -299,9 +323,10 @@ const make = Effect.gen(function* () {
     } satisfies typeof NativeSource.Type;
   });
   const propose = Effect.fn("NativeWorkflows.propose")(function* (
-    { source: sourceRef, ...action }: typeof NativeAction.Type,
+    { source: sourceRef, ...requested }: typeof NativeAction.Type,
     origin = "owner",
   ) {
+    const action = withDefaultEnd(requested);
     if (!validateAction(action))
       return yield* failure(
         "invalid",
