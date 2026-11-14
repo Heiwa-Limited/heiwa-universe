@@ -316,6 +316,25 @@ state are shared as they are.
 Pass `--app`, `--data-dir`, `--cache-dir` and `--backup-dir` to exercise the flow against
 temporary directories.
 
+### Promoting dev to main
+
+`main` only ever receives a `dev` commit that was installed with `desktop:channel install` and run.
+Both branches require a pull request and an up-to-date head, and each promotion leaves a merge
+commit on `main` that `dev` does not have, so promote through a temporary branch instead of
+merging `main` back into `dev`:
+
+```sh
+git fetch origin
+git switch -c promote/<date> origin/dev
+git merge origin/main        # must change no files; stop and investigate if it does
+git diff --quiet origin/dev  # confirms the tree is exactly dev's
+git push -u origin promote/<date>
+```
+
+Open a pull request from that branch into `main`, merge it with a merge commit once `Check` is
+green, and delete the branch. Then run `vp run desktop:channel status` to confirm `origin/main`
+is the commit you promoted.
+
 ### Signing and passkeys
 
 Add `--signed` after configuring the platform credentials in the
