@@ -284,6 +284,38 @@ NSIS is downloaded by electron-builder. WSL support additionally needs the Linux
 passed as `--wsl-runtime`; see the
 [release runbook](./release.md#windows-payload-topology-and-update-validation).
 
+### Installing the dev or main channel
+
+Heiwa has no release feed yet. On the owner's Mac, `~/Applications/Heiwa.app` is built from the
+tip of `origin/dev` or `origin/main` with:
+
+```sh
+vp run desktop:channel status         # installed channel, commit, version; whether origin moved
+vp run desktop:channel install        # build and install the tip of the tracked channel (dev by default)
+vp run desktop:channel switch main    # track main and install it, reusing its cached build if any
+vp run desktop:channel rollback       # swap back to the previously installed app
+```
+
+Builds run in a detached worktree at `~/.cache/heiwa-desktop-channels/checkout` at the exact
+remote commit, never the current checkout. The last build of each channel, the one-generation
+rollback copy, and `state.json` (the tracked channel) live beside it. Each bundle is signed with
+`scripts/sign-macos-local.sh` and carries `Contents/Resources/heiwa-channel.json`; About shows the
+channel next to the commit. The bundle id and data directory do not change, so privacy grants and
+data carry across. Without the local identity the command stops; `--allow-adhoc-signature`
+continues, at the cost of every privacy grant on each install.
+
+A running Heiwa at the install path is asked to quit (SIGTERM, handled like Cmd-Q) before the
+swap. Both channels share `~/.heiwa`. Before a build that would migrate the database runs, the
+command snapshots `userdata/statev2.sqlite` into `~/heiwa-backups/heiwa-desktop/snapshots`. A
+build that does not know every migration the database records is refused;
+`--restore-db-snapshot` installs it with the newest snapshot it can read and sets the newer
+database aside under `displaced/`, so work done since that snapshot is not in the restored
+database. Only the database is protected: settings, secrets, attachments, worktrees and provider
+state are shared as they are.
+
+Pass `--app`, `--data-dir`, `--cache-dir` and `--backup-dir` to exercise the flow against
+temporary directories.
+
 ### Signing and passkeys
 
 Add `--signed` after configuring the platform credentials in the
