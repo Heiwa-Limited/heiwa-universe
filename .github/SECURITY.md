@@ -1,8 +1,12 @@
 # Security policy
 
-Report security vulnerabilities affecting T3 Code or T3 Tools-operated infrastructure to
-[security@ping.gg](mailto:security@ping.gg). Please do not disclose them publicly until we have had
-a reasonable opportunity to investigate and remediate them.
+Report security vulnerabilities in Heiwa through GitHub private vulnerability reporting for
+`Heiwa-Limited/heiwa-universe`. If that is unavailable, contact the repository owner privately.
+Do not open a public issue for exploitable vulnerabilities, leaked secrets, credential material,
+private logs or local user data.
 
-See the [full security policy](https://t3.codes/security-policy) for reporting details, scope,
-and safe harbor terms for good-faith research.
+Include the affected commit, tag or release, exact reproduction steps, the impacted surface, the
+expected impact, and whether secrets or private data were exposed.
+
+Heiwa is a fork of T3 Code. Vulnerabilities in upstream T3 Code or in infrastructure operated by
+T3 Tools belong with that project, not here.

@@ -1,10 +1,15 @@
 name: CI
 
+# Heiwa's CI. Derived from the upstream T3 Code workflow, moved to GitHub-hosted
+# runners with no shared task cache, plus secret scanning, dependency review and
+# the Apple helper build.
+
 on:
   pull_request:
   push:
     branches:
       - main
+      - dev
 
 permissions:
   contents: read
@@ -22,7 +27,7 @@ jobs:
   # open: if the diff cannot be resolved, everything runs.
   changes:
     name: Changes
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       typecheck: ${{ steps.detect.outputs.typecheck }}
@@ -59,11 +64,8 @@ jobs:
   # file, docs included. The `Check` job at the end of this file passes only
   # when every other job passes or was skipped by `changes`.
   lint:
-    permissions:
-      contents: read
-      id-token: write
     name: Lint
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -85,8 +87,6 @@ jobs:
 
       - name: Setup Vite+
         uses: ./.github/actions/setup-ci-deps
-        with:
-          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
 
       # electron's install.js (run by ensure:electron) reads this cache before it
       # downloads from GitHub. The key changes only with the Electron version.
@@ -113,13 +113,10 @@ jobs:
         run: vp check
 
   build:
-    permissions:
-      contents: read
-      id-token: write
     name: Build and Typecheck
     needs: changes
     if: ${{ !cancelled() && (needs.changes.outputs.build != 'false' || needs.changes.outputs.typecheck != 'false') }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -131,14 +128,10 @@ jobs:
             !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
-      - uses: ./.github/actions/setup-apt-mirrors
-        if: needs.changes.outputs.build != 'false'
-
       # Runs in the background while Vite+ installs; the step before the build waits for it.
       - name: Start installing browser secret helper build libraries
         if: needs.changes.outputs.build != 'false'
         run: |
-          sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
           (
             set +e
             sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
@@ -147,8 +140,6 @@ jobs:
 
       - name: Setup Vite+
         uses: ./.github/actions/setup-ci-deps
-        with:
-          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
 
       # electron's install.js (run by ensure:electron) reads this cache before it
       # downloads from GitHub. The key changes only with the Electron version.
@@ -207,13 +198,10 @@ jobs:
   # dependency layers. The concurrency limit stays at the default 4 so peak load
   # per runner is unchanged.
   test:
-    permissions:
-      contents: read
-      id-token: write
     name: Test
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test != 'false' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -225,13 +213,10 @@ jobs:
             !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
           sparse-checkout-cone-mode: false
 
-      - uses: ./.github/actions/setup-apt-mirrors
-
       # The desktop tests compile the browser secret helper. The install runs in
       # the background while Vite+ installs; the step before the tests waits for it.
       - name: Start installing browser secret helper build libraries
         run: |
-          sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
           (
             set +e
             sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
@@ -240,8 +225,6 @@ jobs:
 
       - name: Setup Vite+
         uses: ./.github/actions/setup-ci-deps
-        with:
-          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
 
       # electron's install.js (run by ensure:electron) reads this cache before it
       # downloads from GitHub. The key changes only with the Electron version.
@@ -258,7 +241,7 @@ jobs:
         run: python3 -B .github/scripts/stage-preview-bundle.test.py
 
       - name: Test release checks
-        run: node --test .github/scripts/check-nightly-release.test.cjs .github/scripts/vercel-deployment-output.test.cjs
+        run: node --test .github/scripts/check-nightly-release.test.cjs
 
       - name: Finish installing browser secret helper build libraries
         timeout-minutes: 5
@@ -281,15 +264,11 @@ jobs:
 
   # The web suite is the largest outside the server. In the shared Test job it
   # started last and ran alone for about 40s after everything else finished.
-  # release.yml mirrors this test, test_web, and test_server split.
   test_web:
-    permissions:
-      contents: read
-      id-token: write
     name: Test Web
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test_web != 'false' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -303,8 +282,6 @@ jobs:
 
       - name: Setup Vite+
         uses: ./.github/actions/setup-ci-deps
-        with:
-          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
 
       # The browser project runs React tests in headless Chromium. Same cache key as
       # test_server, so both jobs share one downloaded browser.
@@ -349,13 +326,9 @@ jobs:
   # The shards are the longest jobs, so they gate themselves instead of waiting
   # ~15s for `changes`: a shard the change cannot affect stops after checkout.
   test_server:
-    permissions:
-      contents: read
-      id-token: write
     name: Test Server ${{ matrix.shard }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    # Shards take 2-5 minutes. When the shared task cache throttles reads, each
-    # failed fetch stalls vp for 15-90s, which pushed shards past 10 minutes.
+    runs-on: ubuntu-24.04
+    # Sized for upstream's runners; kept generous for GitHub-hosted ones.
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -380,8 +353,6 @@ jobs:
       - name: Setup Vite+
         if: steps.changes.outputs.test_server != 'false'
         uses: ./.github/actions/setup-ci-deps
-        with:
-          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
 
       # No Electron setup here: `t3` (apps/server) has no Electron dependency
       # and none of its tests touch the runtime. Only the non-server `test`
@@ -433,8 +404,7 @@ jobs:
 
       # integration/transferBudgetV2.integration.test.ts writes the report; exactly one shard
       # produces these files. Gating the upload on their presence keeps a
-      # single `thread-transfer-results` artifact per run, which is the name
-      # thread-transfer-report.yml resolves.
+      # single `thread-transfer-results` artifact per run.
       - name: Detect transfer budget report
         id: transfer_budget
         if: always()
@@ -469,7 +439,7 @@ jobs:
     name: Rust
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -502,7 +472,7 @@ jobs:
     name: Mobile Native Static Analysis
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.mobile_native != 'false' }}
-    runs-on: blacksmith-6vcpu-macos-26
+    runs-on: macos-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -529,13 +499,10 @@ jobs:
         run: vp run lint:mobile
 
   release_smoke:
-    permissions:
-      contents: read
-      id-token: write
     name: Release Smoke
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.release_smoke != 'false' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -549,11 +516,75 @@ jobs:
 
       - name: Setup Vite+
         uses: ./.github/actions/setup-ci-deps
-        with:
-          task-cache-read-token: ${{ secrets.T3_TASK_CACHE_READ_TOKEN }}
 
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
+
+  # Compiles the Swift helper the server ships for Calendar, Reminders and Files.
+  # Mirrors the build in apps/server/scripts/cli.ts. The repo has no Swift tests.
+  apple_native:
+    name: Apple Native Helper
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /native/apple/
+          sparse-checkout-cone-mode: false
+
+      - name: Build the Apple helper
+        run: >-
+          xcrun swiftc -O -parse-as-library
+          native/apple/HeiwaApple.swift native/apple/HeiwaFiles.swift
+          -framework EventKit -o "$RUNNER_TEMP/heiwa-apple"
+
+  # Full history: a secret removed in a later commit is still published.
+  # .gitleaksignore lists the fixtures inherited from the upstream import and
+  # the findings accepted on the retired tree. Do not add Heiwa secrets to it.
+  secret_scan:
+    name: Secret Scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          sparse-checkout: |
+            /.gitleaksignore
+          sparse-checkout-cone-mode: false
+
+      - name: Install Gitleaks
+        run: |
+          set -euo pipefail
+          security_bin="$RUNNER_TEMP/security-bin"
+          archive="$RUNNER_TEMP/gitleaks_8.30.1_linux_x64.tar.gz"
+          mkdir -p "$security_bin"
+          curl --fail --silent --show-error --location \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            --output "$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$security_bin" gitleaks
+          echo "$security_bin" >> "$GITHUB_PATH"
+
+      - name: Scan history for secrets
+        run: gitleaks git --no-banner --redact .
+
+  # The step, not the job, is conditional: a skipped job would need a `changes`
+  # gate to satisfy `Check`.
+  dependency_review:
+    name: Dependency Review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Reject vulnerable dependency changes
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
 
   # Branch protection requires this job by its name, `Check`. It fails when any
   # other job fails, is cancelled, or is skipped without a reason, so splitting
@@ -574,8 +605,11 @@ jobs:
         rust,
         mobile_native_static_analysis,
         release_smoke,
+        apple_native,
+        secret_scan,
+        dependency_review,
       ]
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require every job to pass
@@ -593,8 +627,7 @@ jobs:
                 or (.value.result == "skipped"
                   and (($renamed[.key] // [.key]) | all(.[]; $gates[.] == "false"))))' > /dev/null
 
-      # thread-transfer-report.yml reads this artifact after CI, so a run whose
-      # server tests ran must have produced it.
+      # A run whose server tests ran must have produced the transfer measurements.
       - name: Require transfer measurements
         if: needs.test_server.result == 'success' && needs.changes.outputs.test_server != 'false'
         uses: actions/download-artifact@v8
