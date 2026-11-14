@@ -66,3 +66,11 @@ export function groupBySource(
   }
   return [...groups].map(([key, group]) => ({ key, ...group }));
 }
+
+/** Removal and replacing a note's text are never approved in bulk, matching what automatic changes exclude. */
+export function needsOwnApproval(action: NativeAction): boolean {
+  return (
+    action.operation === "trash" ||
+    (action.app === "notes" && action.operation === "update" && action.body !== undefined)
+  );
+}

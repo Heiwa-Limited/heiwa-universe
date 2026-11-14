@@ -9,7 +9,7 @@ import { resolveHour12 } from "../../timestampFormat";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsGroup } from "../settings/SettingsGroup";
 import { Button } from "../ui/button";
-import { groupBySource, proposalHeading, proposalWhen } from "./approvals.logic";
+import { groupBySource, needsOwnApproval, proposalHeading, proposalWhen } from "./approvals.logic";
 
 function ProposalContent({ proposal }: { proposal: NativeProposal }) {
   const action = proposal.action;
@@ -155,7 +155,9 @@ export function ProposalReviewList({
         </p>
       ) : null}
       {groupBySource(proposals).map((group) => {
-        const reviewable = group.proposals.filter((proposal) => proposal.status === "pending");
+        const reviewable = group.proposals.filter(
+          (proposal) => proposal.status === "pending" && !needsOwnApproval(proposal.action),
+        );
         return (
           <SettingsGroup key={group.key}>
             {group.source ? (

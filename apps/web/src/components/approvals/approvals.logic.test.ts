@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { proposalWhen } from "./approvals.logic";
+import { needsOwnApproval, proposalWhen } from "./approvals.logic";
 
 const fixed = { locale: "en-US", timeZone: "America/Toronto", hour12: true };
 // Intl separates times with thin and narrow no-break spaces.
@@ -17,4 +17,16 @@ describe("proposalWhen", () => {
     ).toBe("Thu, Nov 19, 2026");
     expect(when({})).toBeNull();
   });
+});
+
+it("keeps removal and note replacement out of bulk approval", () => {
+  const base = { resourceId: "r", id: "i", expectedRevision: "v" };
+  expect(needsOwnApproval({ ...base, app: "calendar", operation: "trash" })).toBe(true);
+  expect(needsOwnApproval({ ...base, app: "notes", operation: "update", body: "new" })).toBe(true);
+  expect(needsOwnApproval({ ...base, app: "notes", operation: "append", body: "more" })).toBe(
+    false,
+  );
+  expect(
+    needsOwnApproval({ app: "mail", operation: "create", resourceId: "r", title: "Re: hi" }),
+  ).toBe(false);
 });
