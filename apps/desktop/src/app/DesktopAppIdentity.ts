@@ -6,6 +6,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import { PRODUCT_INSTALL_MARKER_FILE } from "@t3tools/shared/product";
 
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
@@ -19,6 +20,8 @@ const AppPackageMetadata = Schema.Struct({
   t3codeCommitHash: Schema.optional(Schema.String),
 });
 const decodeAppPackageMetadata = Schema.decodeEffect(Schema.fromJsonString(AppPackageMetadata));
+const InstallMarker = Schema.Struct({ channel: Schema.String });
+const decodeInstallMarker = Schema.decodeEffect(Schema.fromJsonString(InstallMarker));
 
 export class DesktopAppIdentity extends Context.Service<
   DesktopAppIdentity,
@@ -85,12 +88,26 @@ export const make = Effect.gen(function* () {
     return commitHash;
   });
 
+  // Builds installed by scripts/desktop-channel.ts name the branch they came from.
+  const resolveInstallChannel = environment.isPackaged
+    ? fileSystem
+        .readFileString(
+          environment.path.join(environment.resourcesPath, PRODUCT_INSTALL_MARKER_FILE),
+        )
+        .pipe(
+          Effect.flatMap(decodeInstallMarker),
+          Effect.map((marker) => Option.some(marker.channel)),
+          Effect.orElseSucceed(() => Option.none<string>()),
+        )
+    : Effect.succeed(Option.none<string>());
+
   const userDataPath = DesktopUserData.resolveUserDataPath(environment).pipe(
     Effect.provide(userDataContext),
   );
 
   const configure = Effect.gen(function* () {
     const commitHash = yield* resolveAboutCommitHash;
+    const installChannel = yield* resolveInstallChannel;
     // Electron strips spaces but keeps parentheses in its User-Agent token, breaking Turnstile in preview sessions.
     yield* electronApp.setName(
       `${environment.branding.baseName} ${environment.branding.stageLabel}`,
@@ -98,7 +115,10 @@ export const make = Effect.gen(function* () {
     yield* electronApp.setAboutPanelOptions({
       applicationName: environment.displayName,
       applicationVersion: environment.appVersion,
-      version: Option.getOrElse(commitHash, () => "unknown"),
+      version: [
+        ...Option.toArray(installChannel),
+        Option.getOrElse(commitHash, () => "unknown"),
+      ].join(" "),
     });
 
     if (environment.platform === "win32") {
