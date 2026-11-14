@@ -1662,7 +1662,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       yield* finishTurn(state, {
         status: "failed",
         failure: makeProviderFailure({
-          message: "OpenCode is waiting on a request T3 Code couldn't answer.",
+          message: "OpenCode is waiting on a request Heiwa couldn't answer.",
           class: "provider_error",
         }),
       });
