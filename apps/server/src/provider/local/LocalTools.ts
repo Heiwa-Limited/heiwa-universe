@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- this provider worker supervises deadline-bound native children.
-import { spawn } from "node:child_process";
-import { realpath } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
 import type { LocalTool } from "./LocalAgent.ts";
 
@@ -10,7 +10,7 @@ const RelativePath = Schema.String.check(
   Schema.isMaxLength(4096),
   Schema.makeFilter(
     (value) =>
-      !isAbsolute(value) &&
+      !NodePath.isAbsolute(value) &&
       value.split(/[\\/]/).every((part) => part !== ".." && part !== "." && part !== "") &&
       !value.includes("\0"),
   ),
@@ -21,7 +21,7 @@ const CreateInput = Schema.Struct({
   content: Schema.String.check(Schema.isMaxLength(64000)),
 });
 const ProcessInput = Schema.Struct({
-  executable: Schema.String.check(Schema.makeFilter(isAbsolute)),
+  executable: Schema.String.check(Schema.makeFilter(NodePath.isAbsolute)),
   args: Schema.Array(Schema.String.check(Schema.isMaxLength(8192))).check(Schema.isMaxLength(128)),
 });
 const encode = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -32,6 +32,10 @@ const FileReply = Schema.Struct({
   sha256: Schema.String,
   created: Schema.Boolean,
 });
+const decodeProcessInput = Schema.decodeUnknownSync(ProcessInput);
+const decodeReadInput = Schema.decodeUnknownSync(ReadInput);
+const decodeCreateInput = Schema.decodeUnknownSync(CreateInput);
+const decodeFileReply = Schema.decodeSync(Schema.fromJsonString(FileReply));
 export const LOCAL_WORKSPACE_TOOLS: ReadonlyArray<LocalTool> = [
   {
     name: "fs_read",
@@ -90,7 +94,7 @@ async function childRun(input: {
     timedOut: boolean;
     truncated: boolean;
   }>((resolve, reject) => {
-    const child = spawn(input.command, input.args, {
+    const child = NodeChildProcess.spawn(input.command, input.args, {
       cwd: input.cwd,
       env: {
         PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
@@ -163,16 +167,17 @@ export async function makeLocalWorkspaceTools(input: {
   helper?: string;
   approve: (name: string, args: Readonly<Record<string, unknown>>) => Promise<boolean>;
 }) {
+  // oxlint-disable-next-line t3code/no-global-process-runtime -- Plain async factory for the standalone local agent; no Effect runtime.
   if (process.platform !== "darwin")
     throw new Error("The Heiwa local workspace tool lane currently requires macOS.");
-  const root = await realpath(input.cwd);
+  const root = await NodeFSP.realpath(input.cwd);
   const helper =
     input.helper ??
-    join(import.meta.dirname, "native", "heiwa-apple").replace(
+    NodePath.join(import.meta.dirname, "native", "heiwa-apple").replace(
       /app\.asar([/\\])/,
       "app.asar.unpacked$1",
     );
-  const profile = workspaceSandbox(root, await realpath(helper));
+  const profile = workspaceSandbox(root, await NodeFSP.realpath(helper));
   return async (
     name: string,
     args: Readonly<Record<string, unknown>>,
@@ -180,7 +185,7 @@ export async function makeLocalWorkspaceTools(input: {
   ): Promise<unknown> => {
     signal?.throwIfAborted();
     if (name === "process_run") {
-      const request = Schema.decodeUnknownSync(ProcessInput)(args);
+      const request = decodeProcessInput(args);
       if (!(await input.approve(name, args)))
         return { error: "Host permission denied. Nothing ran." };
       signal?.throwIfAborted();
@@ -193,9 +198,9 @@ export async function makeLocalWorkspaceTools(input: {
     }
     const request =
       name === "fs_read"
-        ? Schema.decodeUnknownSync(ReadInput)(args)
+        ? decodeReadInput(args)
         : name === "fs_create"
-          ? Schema.decodeUnknownSync(CreateInput)(args)
+          ? decodeCreateInput(args)
           : null;
     if (request === null) throw new Error("No such workspace tool.");
     if (name === "fs_create" && !(await input.approve(name, args)))
@@ -219,6 +224,6 @@ export async function makeLocalWorkspaceTools(input: {
       throw new Error(
         "The scoped file operation was refused or incomplete. Check the path; existing files and symlinks are not replaced.",
       );
-    return Schema.decodeSync(Schema.fromJsonString(FileReply))(result.stdout);
+    return decodeFileReply(result.stdout);
   };
 }

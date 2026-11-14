@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- run the shipped data script against a minimal Apple Notes dictionary fixture.
-import { runInNewContext } from "node:vm";
+import * as NodeVM from "node:vm";
 import * as DateTime from "effect/DateTime";
 import { assert, it } from "@effect/vitest";
 import { NOTES_SCRIPT } from "./NotesScript.ts";
@@ -66,7 +66,7 @@ it("updates the independent title field used by IMAP Notes accounts", () => {
     body: "Replacement body",
   };
   const reply = JSON.parse(
-    runInNewContext(`${NOTES_SCRIPT}\nrun()`, {
+    NodeVM.runInNewContext(`${NOTES_SCRIPT}\nrun()`, {
       ObjC: { import: () => undefined, unwrap: (x: unknown) => x },
       $: {
         NSFileHandle: { fileHandleWithStandardInput: { readDataToEndOfFile: "fixture" } },

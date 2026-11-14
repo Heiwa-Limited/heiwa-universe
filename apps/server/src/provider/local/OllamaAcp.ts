@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- ACP is an isolated stdio worker; the parent runtime owns permissions and durable work.
-import { randomUUID } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import * as Exit from "effect/Exit";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -34,6 +34,14 @@ const ToolList = Schema.Struct({
     }),
   ),
 });
+const decodeToolList = Schema.decodeUnknownSync(ToolList);
+const decodeSessionRef = Schema.decodeUnknownSync(Schema.Struct({ sessionId: Schema.String }));
+const decodeNewSession = Schema.decodeUnknownSync(Acp.NewSessionRequest);
+const decodeSetConfigOption = Schema.decodeUnknownSync(Acp.SetSessionConfigOptionRequest);
+const decodeSetModel = Schema.decodeUnknownSync(
+  Schema.Struct({ sessionId: Schema.String, modelId: Schema.String }),
+);
+const decodePrompt = Schema.decodeUnknownSync(Acp.PromptRequest);
 const ALLOWED_MCP = new Set([
   "heiwa_workflow",
   "heiwa_native_read",
@@ -111,7 +119,7 @@ export async function runOllamaAcp() {
       }).pipe(Scope.provide(workerScope)),
     );
     if (mcp.listTools) {
-      const listed = Schema.decodeUnknownSync(ToolList)(await Effect.runPromise(mcp.listTools()));
+      const listed = decodeToolList(await Effect.runPromise(mcp.listTools()));
       mcpTools = listed.tools
         .filter((tool) => ALLOWED_MCP.has(tool.name))
         .map((tool) => ({
@@ -122,7 +130,7 @@ export async function runOllamaAcp() {
     }
   }
   const findSession = (input: unknown) => {
-    const value = Schema.decodeUnknownSync(Schema.Struct({ sessionId: Schema.String }))(input);
+    const value = decodeSessionRef(input);
     const session = sessions.get(value.sessionId);
     if (!session) throw new Error("No such local session.");
     return { id: value.sessionId, session };
@@ -160,7 +168,7 @@ export async function runOllamaAcp() {
         return;
       }
       if (method === "session/new") {
-        const input = Schema.decodeUnknownSync(Acp.NewSessionRequest)(params);
+        const input = decodeNewSession(params);
         const models = await listLocalModels(endpoint);
         const model =
           process.env.HEIWA_LOCAL_MODEL ??
@@ -168,7 +176,7 @@ export async function runOllamaAcp() {
           models[0];
         if (!model || !models.includes(model))
           throw new Error("No installed local model declares completion and tool support.");
-        const sessionId = randomUUID();
+        const sessionId = NodeCrypto.randomUUID();
         const session: Session = {
           cwd: input.cwd,
           model,
@@ -222,7 +230,7 @@ export async function runOllamaAcp() {
         return;
       }
       if (method === "session/set_config_option") {
-        const input = Schema.decodeUnknownSync(Acp.SetSessionConfigOptionRequest)(params);
+        const input = decodeSetConfigOption(params);
         const { session } = findSession(input);
         if (
           session.active ||
@@ -236,9 +244,7 @@ export async function runOllamaAcp() {
         return;
       }
       if (method === "session/set_model") {
-        const input = Schema.decodeUnknownSync(
-          Schema.Struct({ sessionId: Schema.String, modelId: Schema.String }),
-        )(params);
+        const input = decodeSetModel(params);
         const { session } = findSession(input);
         if (session.active || !session.models.includes(input.modelId))
           throw new Error("This model is not available.");
@@ -256,7 +262,7 @@ export async function runOllamaAcp() {
         return;
       }
       if (method === "session/prompt") {
-        const input = Schema.decodeUnknownSync(Acp.PromptRequest)(params);
+        const input = decodePrompt(params);
         const { session } = findSession(input);
         if (session.active) throw new Error("This local session is already working.");
         const pieces = input.prompt.map((block) => {
@@ -285,7 +291,7 @@ export async function runOllamaAcp() {
             },
             onTool: async (phase, name, args, output) => {
               if (phase === "start") {
-                currentTool = randomUUID();
+                currentTool = NodeCrypto.randomUUID();
                 notify(input.sessionId, {
                   sessionUpdate: "tool_call",
                   toolCallId: currentTool,

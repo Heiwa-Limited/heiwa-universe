@@ -38,6 +38,19 @@ export class LocalAgentError extends Error {
 }
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeResponse = Schema.decodeUnknownSync(Schema.fromJsonString(ResponseBody));
+const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodeModelShow = Schema.decodeUnknownSync(
+  Schema.Struct({
+    capabilities: Schema.Array(Schema.String),
+    remote_model: Schema.optional(Schema.String),
+    remote_host: Schema.optional(Schema.String),
+  }),
+);
+const decodeModelTags = Schema.decodeSync(
+  Schema.fromJsonString(
+    Schema.Struct({ models: Schema.Array(Schema.Struct({ name: Schema.String })) }),
+  ),
+);
 
 /** This lane is loopback-only; cloud and LAN providers must have their own explicit provision. */
 export function localOllamaEndpoint(raw: string): URL {
@@ -98,7 +111,7 @@ export async function localOllamaJson(
     throw new LocalAgentError("transport", `Local inference returned HTTP ${response.status}.`);
   }
   try {
-    return Schema.decodeSync(Schema.fromJsonString(Schema.Unknown))(await boundedBody(response));
+    return decodeJson(await boundedBody(response));
   } catch {
     throw new LocalAgentError("protocol", "Local inference returned an invalid JSON response.");
   }
@@ -138,13 +151,7 @@ export async function runLocalTurn(input: {
     input.signal,
     input.fetchImplementation,
   );
-  const model = Schema.decodeUnknownSync(
-    Schema.Struct({
-      capabilities: Schema.Array(Schema.String),
-      remote_model: Schema.optional(Schema.String),
-      remote_host: Schema.optional(Schema.String),
-    }),
-  )(metadata);
+  const model = decodeModelShow(metadata);
   if (
     model.remote_model ||
     model.remote_host ||
@@ -262,11 +269,7 @@ export async function listLocalModels(
     await response.body?.cancel();
     throw new LocalAgentError("transport", "The local model inventory is unavailable.");
   }
-  const tags = Schema.decodeSync(
-    Schema.fromJsonString(
-      Schema.Struct({ models: Schema.Array(Schema.Struct({ name: Schema.String })) }),
-    ),
-  )(await boundedBody(response));
+  const tags = decodeModelTags(await boundedBody(response));
   const admitted: string[] = [];
   for (const row of tags.models.slice(0, 64)) {
     const raw = await localOllamaJson(
@@ -276,13 +279,7 @@ export async function listLocalModels(
       signal,
       fetchImplementation,
     );
-    const model = Schema.decodeUnknownSync(
-      Schema.Struct({
-        capabilities: Schema.Array(Schema.String),
-        remote_model: Schema.optional(Schema.String),
-        remote_host: Schema.optional(Schema.String),
-      }),
-    )(raw);
+    const model = decodeModelShow(raw);
     if (
       !model.remote_host &&
       !model.remote_model &&

@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- proposal identifiers are generated on the host, never by a model.
-import { randomUUID } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import {
   isNativeInstant,
   NativeAction,
@@ -43,13 +43,12 @@ type ProposalRow = {
   resource_json: string | null;
   origin: string;
 };
+const isNativeWorkflowError = Schema.is(NativeWorkflowError);
 const failure = (code: NativeWorkflowError["code"], detail: string) =>
   new NativeWorkflowError({ code, detail });
 const storageError = () => failure("failed", "Heiwa could not read or save the workflow state.");
 const guarded = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(
-    Effect.mapError((error) => (Schema.is(NativeWorkflowError)(error) ? error : storageError())),
-  );
+  effect.pipe(Effect.mapError((error) => (isNativeWorkflowError(error) ? error : storageError())));
 const decodeRow = Effect.fn("NativeWorkflows.decodeRow")(function* (row: ProposalRow) {
   return {
     id: row.id,
@@ -283,7 +282,7 @@ const make = Effect.gen(function* () {
     if (!resource?.writable)
       return yield* failure("selection", "This resource is missing or read only.");
     const expected = yield* findExpected(action);
-    const id = randomUUID(),
+    const id = NodeCrypto.randomUUID(),
       createdAt = DateTime.formatIso(yield* DateTime.now);
     yield* sql`INSERT INTO heiwa_native_proposals (id, action_json, expected_json, resource_json, origin, status, created_at) VALUES (${id}, ${encodeJson(action)}, ${expected === null ? null : encodeJson(expected)}, ${encodeJson(resource)}, ${origin}, 'pending', ${createdAt})`;
     return {
@@ -467,7 +466,7 @@ const make = Effect.gen(function* () {
                 app,
                 records: [],
                 truncated: false,
-                error: Schema.is(NativeWorkflowError)(error)
+                error: isNativeWorkflowError(error)
                   ? error.detail
                   : "This source could not be read.",
               }),

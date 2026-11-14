@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- SHA-256 binds opaque revisions to complete native snapshots.
-import { createHash } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import {
   NativeApp,
   NativeRecord,
@@ -72,7 +72,7 @@ export const nativeRecord = (raw: NativeSnapshot): typeof NativeRecord.Type => {
   } = raw;
   return {
     ...record,
-    revision: createHash("sha256").update(JSON.stringify(canonical)).digest("hex"),
+    revision: NodeCrypto.createHash("sha256").update(JSON.stringify(canonical)).digest("hex"),
   };
 };
 

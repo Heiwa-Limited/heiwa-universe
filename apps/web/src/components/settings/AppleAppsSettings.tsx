@@ -64,7 +64,7 @@ function ProposalContent({ proposal }: { proposal: NativeProposal }) {
       ) : null}
       {action.start || action.end ? (
         <p className="text-muted-foreground">
-          {action.start} — {action.end}
+          {action.start} to {action.end}
         </p>
       ) : null}
       {action.app === "notes" && action.operation === "update" && action.body !== undefined ? (

@@ -14,6 +14,8 @@ import * as Semaphore from "effect/Semaphore";
 import * as ServerSettings from "../../serverSettings.ts";
 import { listLocalModels, localOllamaEndpoint } from "./LocalAgent.ts";
 
+const isHeiwaLocalConfig = Schema.is(Schema.Struct({ provision: Schema.Literal("heiwa-local") }));
+const isLocalInferenceError = Schema.is(LocalInferenceError);
 const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const env = yield* HostProcess.Environment;
@@ -60,10 +62,7 @@ const make = Effect.gen(function* () {
             const existing = current.providerInstances[instanceId];
             if (
               existing &&
-              (existing.driver !== "acpRegistry" ||
-                !Schema.is(Schema.Struct({ provision: Schema.Literal("heiwa-local") }))(
-                  existing.config,
-                ))
+              (existing.driver !== "acpRegistry" || !isHeiwaLocalConfig(existing.config))
             )
               return yield* new LocalInferenceError({
                 detail:
@@ -106,7 +105,7 @@ const make = Effect.gen(function* () {
       (effect) =>
         effect.pipe(
           Effect.mapError((error) =>
-            Schema.is(LocalInferenceError)(error)
+            isLocalInferenceError(error)
               ? error
               : new LocalInferenceError({
                   detail: "Heiwa could not save the local inference provision.",
