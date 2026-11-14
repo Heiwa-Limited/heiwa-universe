@@ -15,8 +15,10 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as MailIndex from "./MailIndex.ts";
 import * as NativeHost from "./NativeHost.ts";
@@ -174,6 +176,10 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const host = yield* NativeHost.NativeHost;
   const gate = yield* Semaphore.make(1);
+  // Subscribers re-read the whole status, so only the newest signal matters.
+  const changes = yield* PubSub.sliding<void>(1);
+  const announcing = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(Effect.ensuring(PubSub.publish(changes, undefined)));
   const grants = Effect.fn("NativeWorkflows.grants")(function* () {
     const rows = yield* sql<{
       app: typeof NativeApp.Type;
@@ -388,8 +394,19 @@ const make = Effect.gen(function* () {
     yield* sql`UPDATE heiwa_native_proposals SET status = 'applied', result_json = ${encodeJson(result)} WHERE id = ${id}`;
     return { ...(yield* decodeRow(row)), status: "applied" as const, result };
   });
+  const currentStatus = status().pipe(Effect.mapError(storageError));
   return {
-    status: status().pipe(Effect.mapError(storageError)),
+    status: currentStatus,
+    subscribeStatus: Stream.unwrap(
+      Effect.gen(function* () {
+        // Subscribe before reading so a change during the read is not lost.
+        const subscription = yield* PubSub.subscribe(changes);
+        return Stream.concat(
+          Stream.fromEffect(currentStatus),
+          Stream.fromSubscription(subscription).pipe(Stream.mapEffect(() => currentStatus)),
+        );
+      }),
+    ),
     inventory: host.inventory,
     select: Effect.fn("NativeWorkflows.select")(
       function* (
@@ -409,30 +426,35 @@ const make = Effect.gen(function* () {
         yield* sql`INSERT INTO heiwa_native_grants (app, resource_ids_json, resources_json, write_mode) VALUES (${app}, ${encodeJson(resourceIds)}, ${encodeJson(current.filter((row) => resourceIds.includes(row.id)))}, ${mode}) ON CONFLICT(app) DO UPDATE SET resource_ids_json = excluded.resource_ids_json, resources_json = excluded.resources_json, write_mode = excluded.write_mode`;
         return yield* status();
       },
-      (effect) => guarded(gate.withPermits(1)(effect)),
+      (effect) => announcing(guarded(gate.withPermits(1)(effect))),
     ),
     read: (input: NativeReadInput) => guarded(gate.withPermits(1)(read(input))),
     propose: (action: typeof NativeAction.Type, origin?: string) =>
-      guarded(gate.withPermits(1)(propose(action, origin))),
-    approve: (id: string, value: boolean) => guarded(gate.withPermits(1)(approve(id, value))),
-    execute: Effect.fn("NativeWorkflows.execute")(function* (action: typeof NativeAction.Type) {
-      const authority = yield* NativeExecutionAuthority;
-      return yield* gate.withPermits(1)(
-        Effect.gen(function* () {
-          yield* authority.check;
-          const grant = (yield* grants()).find((row) => row.app === action.app);
-          if (
-            grant?.writeMode !== "automatic" ||
-            action.operation === "trash" ||
-            (action.app === "notes" && action.operation === "update" && action.body !== undefined)
-          )
-            return yield* reviewRequired();
-          const proposal = yield* propose(action, authority.origin);
-          yield* authority.check;
-          return yield* approve(proposal.id, true);
-        }),
-      );
-    }, guarded),
+      announcing(guarded(gate.withPermits(1)(propose(action, origin)))),
+    approve: (id: string, value: boolean) =>
+      announcing(guarded(gate.withPermits(1)(approve(id, value)))),
+    execute: Effect.fn("NativeWorkflows.execute")(
+      function* (action: typeof NativeAction.Type) {
+        const authority = yield* NativeExecutionAuthority;
+        return yield* gate.withPermits(1)(
+          Effect.gen(function* () {
+            yield* authority.check;
+            const grant = (yield* grants()).find((row) => row.app === action.app);
+            if (
+              grant?.writeMode !== "automatic" ||
+              action.operation === "trash" ||
+              (action.app === "notes" && action.operation === "update" && action.body !== undefined)
+            )
+              return yield* reviewRequired();
+            const proposal = yield* propose(action, authority.origin);
+            yield* authority.check;
+            return yield* approve(proposal.id, true);
+          }),
+        );
+      },
+      guarded,
+      announcing,
+    ),
     resolve: Effect.fn("NativeWorkflows.resolve")(
       function* (id: string, note: string) {
         const rows = yield* sql<ProposalRow>`SELECT * FROM heiwa_native_proposals WHERE id = ${id}`;
@@ -446,7 +468,7 @@ const make = Effect.gen(function* () {
         yield* sql`UPDATE heiwa_native_proposals SET status = 'acknowledged', detail = ${detail} WHERE id = ${id}`;
         return { ...(yield* decodeRow(row)), status: "acknowledged" as const, detail };
       },
-      (effect) => guarded(gate.withPermits(1)(effect)),
+      (effect) => announcing(guarded(gate.withPermits(1)(effect))),
     ),
     run: Effect.fn("NativeWorkflows.run")(
       function* (input: typeof NativeWorkflowInput.Type) {

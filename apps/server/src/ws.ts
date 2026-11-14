@@ -2190,6 +2190,7 @@ export const layerWsRpc = (
           authorizeEffect(AuthProvidersManageScope, localProvision.connect(input)),
         [WS_METHODS.nativeStatus]: () =>
           authorizeEffect(AuthSettingsWriteScope, nativeWorkflows.status),
+        [WS_METHODS.nativeSubscribe]: () => nativeWorkflows.subscribeStatus,
         [WS_METHODS.nativeInventory]: (input) =>
           authorizeEffect(
             AuthSettingsWriteScope,

@@ -5,10 +5,17 @@ import {
 } from "@t3tools/client-runtime/state/models";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import type { AnyRouter } from "@tanstack/react-router";
-import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
+import {
+  AuthSettingsWriteScope,
+  type EnvironmentId,
+  type NativeProposal,
+  type OrchestrationV2ThreadShell,
+  ThreadId,
+} from "@t3tools/contracts";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import * as Option from "effect/Option";
-import type { AtomRegistry } from "effect/reactivity";
+import { AsyncResult, type AtomRegistry } from "effect/reactivity";
+import type { ReactNode } from "react";
 import {
   CircleAlertIcon,
   CircleCheckIcon,
@@ -18,7 +25,9 @@ import {
 
 import { getClientSettings, subscribeClientSettings } from "../hooks/useSettings";
 import { isWindowsPlatform } from "../lib/utils";
+import { nativeStatusLive } from "../state/native";
 import { environmentSummaries } from "../state/presentation";
+import { environmentSession, sessionHasScope } from "../state/session";
 import { environmentShell } from "../state/shell";
 import { environmentThreadShells } from "../state/threads";
 import {
@@ -35,8 +44,10 @@ import {
   type ThreadNotificationKind,
   type ThreadNotificationObservation,
 } from "./ThreadNotificationCoordinator.logic";
+import { proposalSummary } from "./approvals/approvals.logic";
 import { toastManager } from "./ui/toast";
 
+const APPROVALS_TAG = ThreadId.make("heiwa:approvals");
 interface NotificationState extends ThreadNotificationObservation {
   readonly raw: OrchestrationV2ThreadShell;
   readonly subagentRequest: PendingSubagentRequest | null;
@@ -72,32 +83,26 @@ export function startThreadNotifications(
     setNotificationBadge(0);
   };
 
-  // Completions fire from a timer, so read settings, focus and route when presenting.
-  const present = (
+  // Completions fire from a timer, so read settings and focus when presenting.
+  const announce = (
     environmentId: EnvironmentId,
-    state: NotificationState,
-    kind: ThreadNotificationKind,
+    notice: {
+      readonly title: string;
+      readonly body: string;
+      readonly tag: string;
+      readonly sound: ThreadNotificationKind;
+      readonly toast: "success" | "error" | "warning";
+      readonly icon: ReactNode;
+      /** The user is already looking at what this is about. */
+      readonly inView: boolean;
+      readonly openLabel: string;
+      readonly open: () => void;
+      readonly requireInteraction?: boolean;
+    },
   ) => {
-    const { thread, status } = state;
     const { notificationMode: mode, inAppNotificationsEnabled } = getClientSettings();
-    const active = (router.state.matches.at(-1)?.params ?? {}) as {
-      environmentId?: string;
-      threadId?: string;
-    };
-    const title =
-      kind === "completion"
-        ? "Thread completed"
-        : status === "approval"
-          ? "Approval needed"
-          : status === "limited"
-            ? "Usage limit reached"
-            : status === "failed"
-              ? "Thread failed"
-              : status === "request"
-                ? "Guest request"
-                : "Input needed";
     if (hasNotificationSound(mode)) {
-      void playNotificationSound(kind, () =>
+      void playNotificationSound(notice.sound, () =>
         hasNotificationSound(getClientSettings().notificationMode),
       );
     }
@@ -105,33 +110,18 @@ export function startThreadNotifications(
       inAppNotificationsEnabled &&
       document.visibilityState === "visible" &&
       document.hasFocus() &&
-      (active.environmentId !== environmentId || active.threadId !== thread.id)
+      !notice.inView
     ) {
       const toastId = toastManager.add({
-        type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
-        title,
-        description: thread.title,
-        data: {
-          hideCopyButton: true,
-          leadingIcon:
-            kind === "completion" ? (
-              <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />
-            ) : status === "approval" ? (
-              <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />
-            ) : status === "failed" ? (
-              <CircleAlertIcon aria-hidden className="size-4 text-destructive-foreground" />
-            ) : (
-              <MessageCircleQuestionIcon aria-hidden className="size-4 text-info-foreground" />
-            ),
-        },
+        type: notice.toast,
+        title: notice.title,
+        description: notice.body,
+        data: { hideCopyButton: true, leadingIcon: notice.icon },
         actionProps: {
-          children: "Open thread",
+          children: notice.openLabel,
           onClick: () => {
             toastManager.close(toastId);
-            void router.navigate({
-              to: "/$environmentId/$threadId",
-              params: { environmentId, threadId: thread.id },
-            });
+            notice.open();
           },
         },
       });
@@ -145,27 +135,86 @@ export function startThreadNotifications(
     )
       return;
     try {
-      const notification = new Notification(title, {
-        body: thread.title,
-        tag: threadNotificationTag(environmentId, thread.id),
+      const notification = new Notification(notice.title, {
+        body: notice.body,
+        tag: notice.tag,
         silent: true,
-        // Windows drops clicks after a toast moves into Notification Center.
-        requireInteraction: kind === "completion" && isWindowsPlatform(navigator.platform),
+        requireInteraction: notice.requireInteraction === true,
       });
       trackNotification(environmentId, notification);
       notification.addEventListener("click", () => {
         notification.close();
         window.focus();
         void window.desktopBridge?.revealWindow().catch(() => undefined);
-        void router.navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId, threadId: thread.id },
-        });
+        notice.open();
       });
     } catch {
       // Some browsers expose Notification but reject desktop presentation.
     }
   };
+
+  const present = (
+    environmentId: EnvironmentId,
+    state: NotificationState,
+    kind: ThreadNotificationKind,
+  ) => {
+    const { thread, status } = state;
+    const active = (router.state.matches.at(-1)?.params ?? {}) as {
+      environmentId?: string;
+      threadId?: string;
+    };
+    announce(environmentId, {
+      title:
+        kind === "completion"
+          ? "Thread completed"
+          : status === "approval"
+            ? "Approval needed"
+            : status === "limited"
+              ? "Usage limit reached"
+              : status === "failed"
+                ? "Thread failed"
+                : status === "request"
+                  ? "Guest request"
+                  : "Input needed",
+      body: thread.title,
+      tag: threadNotificationTag(environmentId, thread.id),
+      sound: kind,
+      toast: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
+      icon:
+        kind === "completion" ? (
+          <CircleCheckIcon aria-hidden className="size-4 text-success-foreground" />
+        ) : status === "approval" ? (
+          <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />
+        ) : status === "failed" ? (
+          <CircleAlertIcon aria-hidden className="size-4 text-destructive-foreground" />
+        ) : (
+          <MessageCircleQuestionIcon aria-hidden className="size-4 text-info-foreground" />
+        ),
+      inView: active.environmentId === environmentId && active.threadId === thread.id,
+      openLabel: "Open thread",
+      open: () =>
+        void router.navigate({
+          to: "/$environmentId/$threadId",
+          params: { environmentId, threadId: thread.id },
+        }),
+      // Windows drops clicks after a toast moves into Notification Center.
+      requireInteraction: kind === "completion" && isWindowsPlatform(navigator.platform),
+    });
+  };
+
+  const presentProposal = (environmentId: EnvironmentId, proposal: NativeProposal) =>
+    announce(environmentId, {
+      title: "Approval needed",
+      body: proposalSummary(proposal),
+      // One notification per Mac: a newer change replaces the one before it.
+      tag: threadNotificationTag(environmentId, APPROVALS_TAG),
+      sound: "input",
+      toast: "warning",
+      icon: <ShieldQuestionIcon aria-hidden className="size-4 text-warning-foreground" />,
+      inView: router.state.location.pathname === "/approvals",
+      openLabel: "Review",
+      open: () => void router.navigate({ to: "/approvals" }),
+    });
 
   const observeThreads = (
     environmentId: EnvironmentId,
@@ -268,10 +317,39 @@ export function startThreadNotifications(
       environmentThreadShells.delegatedUnderParentAtom,
       reobserve,
     );
+    // What was already waiting at first sight is not news; only later arrivals notify.
+    let knownProposals: ReadonlySet<string> | null = null;
+    let unsubscribeProposals = () => {};
+    // Only the owner's session may read Apple changes, and its scopes arrive after the connection.
+    const unsubscribeSession = registry.subscribe(
+      environmentSession.sessionStateAtom(environmentId),
+      (session) => {
+        unsubscribeProposals();
+        unsubscribeProposals = () => {};
+        if (!sessionHasScope(session, AuthSettingsWriteScope)) return;
+        unsubscribeProposals = registry.subscribe(
+          nativeStatusLive({ environmentId, input: {} }),
+          (result) => {
+            const status = AsyncResult.getOrElse(result, () => null);
+            if (status === null) return;
+            const waiting = status.pending.filter((proposal) => proposal.status === "pending");
+            const prior = knownProposals;
+            knownProposals = new Set(waiting.map((proposal) => proposal.id));
+            if (prior === null) return;
+            for (const proposal of waiting)
+              if (!prior.has(proposal.id)) presentProposal(environmentId, proposal);
+          },
+          { immediate: true },
+        );
+      },
+      { immediate: true },
+    );
     entry.unsubscribe = () => {
       unsubscribeShell();
       unsubscribeRequests();
       unsubscribeDelegated();
+      unsubscribeSession();
+      unsubscribeProposals();
       entry.gate.clear();
     };
     return entry;
