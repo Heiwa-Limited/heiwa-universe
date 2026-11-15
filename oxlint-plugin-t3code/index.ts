@@ -7,6 +7,7 @@ import noFrameWaitsInBrowserTests from "./rules/no-frame-waits-in-browser-tests.
 import noGlobalProcessRuntime from "./rules/no-global-process-runtime.ts";
 import noHermesUnsupportedApis from "./rules/no-hermes-unsupported-apis.ts";
 import noHooklessUseFunction from "./rules/no-hookless-use-function.ts";
+import noHostImportsInClients from "./rules/no-host-imports-in-clients.ts";
 import noInlineSchemaCompile from "./rules/no-inline-schema-compile.ts";
 import noLowValueComments from "./rules/no-low-value-comments.ts";
 import noManualMemo from "./rules/no-manual-memo.ts";
@@ -45,6 +46,7 @@ export default definePlugin({
     "no-global-process-runtime": noGlobalProcessRuntime,
     "no-hermes-unsupported-apis": noHermesUnsupportedApis,
     "no-hookless-use-function": noHooklessUseFunction,
+    "no-host-imports-in-clients": noHostImportsInClients,
     "no-inline-schema-compile": noInlineSchemaCompile,
     "no-low-value-comments": noLowValueComments,
     "no-manual-effect-runtime-in-tests": noManualEffectRuntimeInTests,
