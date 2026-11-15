@@ -9,7 +9,11 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
-import { requireAttendedTurn, requireOwnerClient } from "../mcp/toolkits/native/handlers.ts";
+import {
+  requireAttendedTurn,
+  requireIntakeClient,
+  requireOwnerClient,
+} from "../mcp/toolkits/native/handlers.ts";
 const base = {
   environmentId: EnvironmentId.make("test"),
   requestNamespace: "test",
@@ -49,6 +53,18 @@ it.effect(
           ))._tag,
           "Failure",
         );
+      // Intake consumes mail: an agent's thread may run it, a read-only client may not.
+      const [agent, readOnly] = scopes;
+      yield* requireIntakeClient.pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, agent!),
+      );
+      assert.equal(
+        (yield* requireIntakeClient.pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, readOnly!),
+          Effect.result,
+        ))._tag,
+        "Failure",
+      );
       yield* requireOwnerClient.pipe(
         Effect.provideService(McpInvocationContext.McpInvocationContext, {
           ...base,
