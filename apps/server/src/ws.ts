@@ -2210,7 +2210,13 @@ export const layerWsRpc = (
         [WS_METHODS.nativeApprove]: (input) =>
           authorizeEffect(AuthSettingsWriteScope, nativeWorkflows.approve(input.id, input.approve)),
         [WS_METHODS.nativeWorkflow]: (input) =>
-          authorizeEffect(AuthOrchestrationReadScope, nativeWorkflows.run(input)),
+          authorizeEffect(
+            // Intake hands each message out once, so reading it is an operation.
+            input.workflow === "mail-intake"
+              ? AuthOrchestrationOperateScope
+              : AuthOrchestrationReadScope,
+            nativeWorkflows.run(input),
+          ),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: (_input) =>
           loadServerConfig({ usageLimitsCommand: false, workspaceSnapshotsOnDemand: false }),

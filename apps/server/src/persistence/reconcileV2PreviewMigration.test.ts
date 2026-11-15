@@ -58,6 +58,7 @@ describe("V2 preview upgrade", () => {
         [76, "HeiwaNativeWorkflows"],
         [77, "NativeWorkflowAuthority"],
         [78, "NativeProposalSource"],
+        [79, "NativeIntakeCursor"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -159,6 +160,7 @@ describe("V2 preview upgrade", () => {
         [76, "HeiwaNativeWorkflows"],
         [77, "NativeWorkflowAuthority"],
         [78, "NativeProposalSource"],
+        [79, "NativeIntakeCursor"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
