@@ -273,6 +273,35 @@ const make = Effect.gen(function* () {
         result.truncated || result.records.some((record) => record.contentTruncated === true),
     };
   });
+  const instant = (value: DateTime.Utc) => `${DateTime.formatIso(value).slice(0, 19)}Z`;
+  // The cursor moves when mail is handed out, not when a run finishes: a failed run misses a
+  // suggestion, which costs less than proposing the same email twice.
+  const mailIntake = Effect.fn("NativeWorkflows.mailIntake")(function* (limit: number) {
+    const rows = yield* sql<{
+      after: string;
+    }>`SELECT after FROM heiwa_native_intake WHERE app = 'mail'`;
+    const after = rows[0]?.after ?? instant(DateTime.subtract(yield* DateTime.now, { days: 1 }));
+    const result = yield* read({ app: "mail", start: after, limit }).pipe(Effect.result);
+    if (result._tag === "Failure")
+      return {
+        app: "mail" as const,
+        records: [],
+        truncated: false,
+        error: isNativeWorkflowError(result.failure)
+          ? result.failure.detail
+          : "This source could not be read.",
+      };
+    const newest = Math.max(
+      ...result.success.records
+        .map((record) => Date.parse(record.start ?? ""))
+        .filter(Number.isFinite),
+    );
+    if (Number.isFinite(newest)) {
+      const next = instant(DateTime.makeUnsafe(newest + 1000));
+      yield* sql`INSERT INTO heiwa_native_intake (app, after) VALUES ('mail', ${next}) ON CONFLICT(app) DO UPDATE SET after = excluded.after`;
+    }
+    return { app: "mail" as const, ...result.success, error: null };
+  });
   const requireSelection = Effect.fn("NativeWorkflows.requireSelection")(function* (
     action: typeof NativeAction.Type,
   ) {
@@ -525,6 +554,12 @@ const make = Effect.gen(function* () {
             workflow: input.workflow,
             status: { ...(yield* status()), pending: [], recent: [] },
             sources: [],
+          };
+        if (input.workflow === "mail-intake")
+          return {
+            workflow: input.workflow,
+            status: { ...(yield* status()), pending: [], recent: [] },
+            sources: [yield* mailIntake(input.limit ?? 10)],
           };
         const window =
           input.start === undefined && input.end === undefined

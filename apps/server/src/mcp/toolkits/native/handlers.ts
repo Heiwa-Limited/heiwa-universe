@@ -80,9 +80,17 @@ export const layer = McpToolAccess.toLayer(
     const service = yield* NativeWorkflows.NativeWorkflows;
     return {
       heiwa_workflow: McpToolAccess.reads((input) =>
-        service
-          .run(input)
-          .pipe(Effect.map((result) => ({ ...result, status: { ...result.status, pending: [] } }))),
+        Effect.gen(function* () {
+          const scope = yield* McpInvocationContext.McpInvocationContext;
+          // Intake hands each message out once, so a read-only client must not be able to drain it.
+          if (input.workflow === "mail-intake" && scope.client?.access === "read-only")
+            return yield* new NativeWorkflowError({
+              code: "permission",
+              detail: "Mail intake needs a client that may make changes.",
+            });
+          const result = yield* service.run(input);
+          return { ...result, status: { ...result.status, pending: [] } };
+        }),
       ),
       heiwa_native_execute: McpToolAccess.writesEnvironment((input, check) =>
         Effect.gen(function* () {

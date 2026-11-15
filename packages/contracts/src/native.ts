@@ -165,7 +165,7 @@ export const NativeResolutionInput = Schema.Struct({
 });
 export const NativeApprovalInput = Schema.Struct({ id: Id, approve: Schema.Boolean });
 export const NativeWorkflowInput = Schema.Struct({
-  workflow: Schema.Literals(["daily-brief", "native-audit"]),
+  workflow: Schema.Literals(["daily-brief", "native-audit", "mail-intake"]),
   start: Schema.optional(Instant),
   end: Schema.optional(Instant),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),

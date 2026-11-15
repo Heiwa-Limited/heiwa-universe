@@ -12,6 +12,7 @@ import * as NativeWorkflows from "./NativeWorkflows.ts";
 import authorityMigration from "../persistence/Migrations/077_NativeWorkflowAuthority.ts";
 import migration from "../persistence/Migrations/076_HeiwaNativeWorkflows.ts";
 import sourceMigration from "../persistence/Migrations/078_NativeProposalSource.ts";
+import intakeMigration from "../persistence/Migrations/079_NativeIntakeCursor.ts";
 
 const snapshot: NativeHost.NativeSnapshot = {
   app: "reminders",
@@ -30,12 +31,23 @@ const resource = { app: "reminders" as const, id: "list-1", title: "Test list", 
 const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
   let writes = 0;
   let applied: ReadonlyArray<string> = [];
+  const mailStarts: Array<string | undefined> = [];
+  let mail: ReadonlyArray<NativeHost.NativeSnapshot> = [];
   let currentResource = resource;
   const host = NativeHost.NativeHost.of({
     platform: "darwin",
     inventory: () => Effect.succeed([currentResource]),
-    read: (_input, ids) =>
-      Effect.succeed({ records: ids.includes("list-1") ? [snapshot] : [], truncated: false }),
+    read: (input, ids) => {
+      if (input.app !== "mail")
+        return Effect.succeed({
+          records: ids.includes("list-1") ? [snapshot] : [],
+          truncated: false,
+        });
+      mailStarts.push(input.start);
+      const records = mail;
+      mail = [];
+      return Effect.succeed({ records, truncated: false });
+    },
     inspect: () => Effect.succeed(snapshot),
     apply: (action, expected) => {
       writes += 1;
@@ -52,11 +64,19 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
   return {
     writes: () => writes,
     appliedFields: () => applied,
+    mailStarts: () => mailStarts,
+    deliverMail: (received: string) => {
+      mail = [{ ...snapshot, app: "mail", id: received, title: "Hello", start: received }];
+    },
     renameResource: () => {
       currentResource = { ...resource, title: "Renamed list" };
     },
     layer: Layer.effectDiscard(
-      migration.pipe(Effect.andThen(authorityMigration), Effect.andThen(sourceMigration)),
+      migration.pipe(
+        Effect.andThen(authorityMigration),
+        Effect.andThen(sourceMigration),
+        Effect.andThen(intakeMigration),
+      ),
     ).pipe(
       Layer.provideMerge(
         NativeWorkflows.layer.pipe(Layer.provide(Layer.succeed(NativeHost.NativeHost, host))),
@@ -210,6 +230,30 @@ describe("native workflow authority", () => {
           .pipe(Effect.result))._tag,
         "Failure",
       );
+    }).pipe(Effect.provide(f.layer));
+  });
+  it.effect("hands each new message to intake once and resumes after the newest one", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const service = yield* NativeWorkflows.NativeWorkflows;
+      yield* service.select("mail", ["list-1"]);
+      const intake = () =>
+        service
+          .run({ workflow: "mail-intake" })
+          .pipe(Effect.map((result) => result.sources[0]?.records.length));
+      f.deliverMail("2026-11-14T10:00:00Z");
+      assert.equal(yield* intake(), 1);
+      assert.equal(yield* intake(), 0);
+      f.deliverMail("2026-11-14T11:30:00Z");
+      assert.equal(yield* intake(), 1);
+      yield* intake();
+      // The first run looks back a day from the test clock's epoch; later runs start after what was handed out.
+      assert.deepStrictEqual(f.mailStarts(), [
+        "1969-12-31T00:00:00Z",
+        "2026-11-14T10:00:01Z",
+        "2026-11-14T10:00:01Z",
+        "2026-11-14T11:30:01Z",
+      ]);
     }).pipe(Effect.provide(f.layer));
   });
   it.effect("requires exact current revision before staging an edit", () => {
