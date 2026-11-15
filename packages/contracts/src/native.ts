@@ -66,13 +66,12 @@ export const NativeReadInput = Schema.Struct({
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
   query: Schema.optional(
     Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
-      description: "Mail only: subject or sender text. Omit for other apps.",
+      description: "Mail only: subject or sender text.",
     }),
   ),
   ids: Schema.optional(
     Schema.Array(Id).check(Schema.isMinLength(1), Schema.isMaxLength(5)).annotate({
-      description:
-        "Mail only: message ids from an earlier Mail read, to get full text. Omit to list items.",
+      description: "Mail only: ids from an earlier read, for full text.",
     }),
   ),
 });
@@ -81,7 +80,16 @@ export const NativeReadResult = Schema.Struct({
   records: Schema.Array(NativeRecord),
   truncated: Schema.Boolean,
 });
-export const NativeAction = Schema.Struct({
+/** The item a change answers, such as the email an event or a reply came from. */
+const NativeSourceRef = Schema.Struct({ app: NativeApp, resourceId: Id, id: Id });
+export const NativeSource = Schema.Struct({
+  ...NativeSourceRef.fields,
+  title: Text,
+  sender: Schema.optional(Text),
+});
+export type NativeSource = typeof NativeSource.Type;
+/** A change without its source: what the Apple write receives and what automatic changes take. */
+export const NativeChange = Schema.Struct({
   app: NativeApp,
   operation: Schema.Literals(["create", "update", "append", "complete", "trash"]),
   resourceId: Id,
@@ -98,12 +106,22 @@ export const NativeAction = Schema.Struct({
   /** Mail drafts only. Heiwa saves drafts; sending stays in Mail. */
   recipients: Schema.optional(Schema.Array(Email).check(Schema.isMaxLength(20))),
 });
+export type NativeChange = typeof NativeChange.Type;
+export const NativeAction = Schema.Struct({
+  ...NativeChange.fields,
+  source: Schema.optional(
+    NativeSourceRef.annotate({
+      description: "Item this change answers, from a read, such as the email it came from.",
+    }),
+  ),
+});
 export type NativeAction = typeof NativeAction.Type;
 export const NativeProposal = Schema.Struct({
   id: Id,
   action: NativeAction,
   resource: Schema.NullOr(NativeResource),
   before: Schema.NullOr(NativeRecord),
+  source: Schema.NullOr(NativeSource),
   status: Schema.Literals([
     "pending",
     "applying",

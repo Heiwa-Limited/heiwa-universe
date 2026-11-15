@@ -1,4 +1,4 @@
-import type { NativeAction, NativeProposal } from "@t3tools/contracts";
+import type { NativeAction, NativeProposal, NativeSource } from "@t3tools/contracts";
 
 const HEADINGS: Record<NativeAction["app"], Partial<Record<NativeAction["operation"], string>>> = {
   calendar: {
@@ -44,4 +44,33 @@ export function proposalWhen(
   if (Number.isNaN(start) || Number.isNaN(end))
     return format.format(Number.isNaN(start) ? end : start);
   return format.formatRange(start, action.allDay ? Math.max(start, end - 1) : end);
+}
+
+export interface ProposalGroup {
+  readonly key: string;
+  readonly source: NativeSource | null;
+  readonly proposals: ReadonlyArray<NativeProposal>;
+}
+
+/** Changes that answer the same item are reviewed together; the rest stand alone. */
+export function groupBySource(
+  proposals: ReadonlyArray<NativeProposal>,
+): ReadonlyArray<ProposalGroup> {
+  const groups = new Map<string, { source: NativeSource | null; proposals: NativeProposal[] }>();
+  for (const proposal of proposals) {
+    const { source } = proposal;
+    const key = source === null ? proposal.id : `${source.app}\n${source.resourceId}\n${source.id}`;
+    const group = groups.get(key);
+    if (group) group.proposals.push(proposal);
+    else groups.set(key, { source, proposals: [proposal] });
+  }
+  return [...groups].map(([key, group]) => ({ key, ...group }));
+}
+
+/** Removal and replacing a note's text are never approved in bulk, matching what automatic changes exclude. */
+export function needsOwnApproval(action: NativeAction): boolean {
+  return (
+    action.operation === "trash" ||
+    (action.app === "notes" && action.operation === "update" && action.body !== undefined)
+  );
 }

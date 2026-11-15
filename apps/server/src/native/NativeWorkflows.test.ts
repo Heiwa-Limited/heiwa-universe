@@ -11,6 +11,7 @@ import * as NativeHost from "./NativeHost.ts";
 import * as NativeWorkflows from "./NativeWorkflows.ts";
 import authorityMigration from "../persistence/Migrations/077_NativeWorkflowAuthority.ts";
 import migration from "../persistence/Migrations/076_HeiwaNativeWorkflows.ts";
+import sourceMigration from "../persistence/Migrations/078_NativeProposalSource.ts";
 
 const snapshot: NativeHost.NativeSnapshot = {
   app: "reminders",
@@ -28,6 +29,7 @@ const snapshot: NativeHost.NativeSnapshot = {
 const resource = { app: "reminders" as const, id: "list-1", title: "Test list", writable: true };
 const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
   let writes = 0;
+  let applied: ReadonlyArray<string> = [];
   let currentResource = resource;
   const host = NativeHost.NativeHost.of({
     platform: "darwin",
@@ -37,6 +39,7 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
     inspect: () => Effect.succeed(snapshot),
     apply: (action, expected) => {
       writes += 1;
+      applied = Object.keys(action);
       return apply
         ? apply(action, expected)
         : Effect.succeed({
@@ -48,10 +51,13 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
   });
   return {
     writes: () => writes,
+    appliedFields: () => applied,
     renameResource: () => {
       currentResource = { ...resource, title: "Renamed list" };
     },
-    layer: Layer.effectDiscard(Effect.andThen(migration, authorityMigration)).pipe(
+    layer: Layer.effectDiscard(
+      migration.pipe(Effect.andThen(authorityMigration), Effect.andThen(sourceMigration)),
+    ).pipe(
       Layer.provideMerge(
         NativeWorkflows.layer.pipe(Layer.provide(Layer.succeed(NativeHost.NativeHost, host))),
       ),
@@ -188,6 +194,24 @@ describe("native workflow authority", () => {
       assert.equal(yield* Queue.take(seen), 0);
     }).pipe(Effect.scoped, Effect.provide(f.layer));
   });
+  it.effect("names a change's source from the item itself and keeps it out of the write", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const service = yield* selected;
+      const source = { app: "reminders" as const, resourceId: "list-1", id: "reminder-1" };
+      const proposal = yield* service.propose({ ...create, source });
+      assert.deepStrictEqual(proposal.source, { ...source, title: "Before" });
+      assert.deepStrictEqual((yield* service.status).pending[0]?.source, proposal.source);
+      yield* service.approve(proposal.id, true);
+      assert.isFalse(f.appliedFields().includes("source"));
+      assert.equal(
+        (yield* service
+          .propose({ ...create, source: { ...source, resourceId: "list-2" } })
+          .pipe(Effect.result))._tag,
+        "Failure",
+      );
+    }).pipe(Effect.provide(f.layer));
+  });
   it.effect("requires exact current revision before staging an edit", () => {
     const f = fixture();
     return Effect.gen(function* () {
@@ -288,6 +312,21 @@ it("daily brief uses the Mac day boundary across daylight-saving changes", () =>
   );
 });
 
+it("gives a timed event without an end one hour in its own time zone", () => {
+  const event = {
+    app: "calendar" as const,
+    operation: "create" as const,
+    resourceId: "calendar-1",
+    title: "Dinner",
+    start: "2026-11-19T23:30:00-05:00",
+  };
+  assert.equal(NativeWorkflows.withDefaultEnd(event).end, "2026-11-20T00:30:00-05:00");
+  assert.equal(
+    NativeWorkflows.withDefaultEnd({ ...event, end: "2026-11-20T02:00:00-05:00" }).end,
+    "2026-11-20T02:00:00-05:00",
+  );
+  assert.isUndefined(NativeWorkflows.withDefaultEnd({ ...event, allDay: true }).end);
+});
 it("validates reminder due dates and prevents cross-app reminder metadata", () => {
   assert.isTrue(NativeWorkflows.validateAction({ ...create, due: "2026-11-02", priority: 1 }));
   assert.isTrue(NativeWorkflows.validateAction({ ...create, due: null }));
