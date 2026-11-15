@@ -175,6 +175,25 @@ const CODE = /\.[cm]?[jt]sx?$/;
 const TEST = /\.test\.[cm]?[jt]sx?$/;
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+export const crossFileTests = (files: ReadonlyArray<string>, affected: ReadonlyArray<string>) => [
+  ...(affected.includes("t3") ? ["apps/server/src/provider/AgentContextBudget.test.ts"] : []),
+  ...(files.some((file) => file.startsWith("apps/mobile/src/") && CODE.test(file))
+    ? ["apps/mobile/src/dependency-graph.test.ts"]
+    : []),
+];
+
+export const crossFileTestDirectories = (files: ReadonlyArray<string>) =>
+  files.some((file) =>
+    [
+      "vite.config.ts",
+      "oxlint-plugin-t3code/index.ts",
+      "oxlint-plugin-t3code/utils.ts",
+      "oxlint-plugin-t3code/test/utils.ts",
+    ].includes(file),
+  )
+    ? ["oxlint-plugin-t3code/rules"]
+    : [];
+
 // A flag wins over its environment variable; either must be a positive integer.
 const override = Effect.fn("checkChanged.override")(function* (
   flagName: string,
@@ -309,8 +328,12 @@ const checkChanged = Effect.fn("checkChanged")(function* (input: {
       if (entry.startsWith(prefix) && TEST.test(entry)) tests.add(path.join(dir, entry));
     }
   }
-  // It reads files other than the ones beside it, so no changed file selects it.
-  if (affected.includes("t3")) tests.add("apps/server/src/provider/AgentContextBudget.test.ts");
+  for (const test of crossFileTests(files, affected)) tests.add(test);
+  for (const dir of crossFileTestDirectories(files)) {
+    for (const entry of yield* fs.readDirectory(inRoot(dir))) {
+      if (TEST.test(entry)) tests.add(path.join(dir, entry));
+    }
+  }
 
   // React Compiler coverage compiles every client source file, so run only the
   // changed files' cases, in one extra step: a -t filter in the main test step
