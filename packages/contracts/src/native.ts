@@ -66,13 +66,12 @@ export const NativeReadInput = Schema.Struct({
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
   query: Schema.optional(
     Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)).annotate({
-      description: "Mail only: subject or sender text. Omit for other apps.",
+      description: "Mail only: subject or sender text.",
     }),
   ),
   ids: Schema.optional(
     Schema.Array(Id).check(Schema.isMinLength(1), Schema.isMaxLength(5)).annotate({
-      description:
-        "Mail only: message ids from an earlier Mail read, to get full text. Omit to list items.",
+      description: "Mail only: ids from an earlier read, for full text.",
     }),
   ),
 });
@@ -89,7 +88,8 @@ export const NativeSource = Schema.Struct({
   sender: Schema.optional(Text),
 });
 export type NativeSource = typeof NativeSource.Type;
-export const NativeAction = Schema.Struct({
+/** A change without its source: what the Apple write receives and what automatic changes take. */
+export const NativeChange = Schema.Struct({
   app: NativeApp,
   operation: Schema.Literals(["create", "update", "append", "complete", "trash"]),
   resourceId: Id,
@@ -105,10 +105,13 @@ export const NativeAction = Schema.Struct({
   allDay: Schema.optional(Schema.Boolean),
   /** Mail drafts only. Heiwa saves drafts; sending stays in Mail. */
   recipients: Schema.optional(Schema.Array(Email).check(Schema.isMaxLength(20))),
+});
+export type NativeChange = typeof NativeChange.Type;
+export const NativeAction = Schema.Struct({
+  ...NativeChange.fields,
   source: Schema.optional(
     NativeSourceRef.annotate({
-      description:
-        "Item this change answers (app, resourceId, id from a read), such as the email an event or reply came from.",
+      description: "Item this change answers, from a read, such as the email it came from.",
     }),
   ),
 });
