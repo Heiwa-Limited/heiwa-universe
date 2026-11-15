@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import { ProviderInstanceId } from "./providerInstance.ts";
+export const LOCAL_PROVIDER_INSTANCE_ID = ProviderInstanceId.make("heiwa_ollama");
 export const LocalInferenceInput = Schema.Struct({
   endpoint: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),

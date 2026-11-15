@@ -276,11 +276,14 @@ const make = Effect.gen(function* () {
   const instant = (value: DateTime.Utc) => `${DateTime.formatIso(value).slice(0, 19)}Z`;
   // The cursor moves when mail is handed out, not when a run finishes: a failed run misses a
   // suggestion, which costs less than proposing the same email twice.
-  const mailIntake = Effect.fn("NativeWorkflows.mailIntake")(function* (limit: number) {
+  const intakeAfter = Effect.gen(function* () {
     const rows = yield* sql<{
       after: string;
     }>`SELECT after FROM heiwa_native_intake WHERE app = 'mail'`;
-    const after = rows[0]?.after ?? instant(DateTime.subtract(yield* DateTime.now, { days: 1 }));
+    return rows[0]?.after ?? instant(DateTime.subtract(yield* DateTime.now, { days: 1 }));
+  });
+  const mailIntake = Effect.fn("NativeWorkflows.mailIntake")(function* (limit: number) {
+    const after = yield* intakeAfter;
     const result = yield* read({ app: "mail", start: after, limit }).pipe(Effect.result);
     if (result._tag === "Failure")
       return {
@@ -369,6 +372,10 @@ const make = Effect.gen(function* () {
       return yield* failure("selection", "This resource is missing or read only.");
     const expected = yield* findExpected(action);
     const source = sourceRef === undefined ? null : yield* findSource(sourceRef);
+    // A model sometimes stages one change twice in a turn; the repeat returns the first.
+    const same =
+      yield* sql<ProposalRow>`SELECT * FROM heiwa_native_proposals WHERE status = 'pending' AND action_json = ${encodeJson(action)} LIMIT 1`;
+    if (same[0] !== undefined) return yield* decodeRow(same[0]);
     const id = NodeCrypto.randomUUID(),
       createdAt = DateTime.formatIso(yield* DateTime.now);
     yield* sql`INSERT INTO heiwa_native_proposals (id, action_json, expected_json, resource_json, source_json, origin, status, created_at) VALUES (${id}, ${encodeJson(action)}, ${expected === null ? null : encodeJson(expected)}, ${encodeJson(resource)}, ${source === null ? null : encodeJson(source)}, ${origin}, 'pending', ${createdAt})`;
@@ -546,6 +553,13 @@ const make = Effect.gen(function* () {
         return { ...(yield* decodeRow(row)), status: "acknowledged" as const, detail };
       },
       (effect) => announcing(guarded(gate.withPermits(1)(effect))),
+    ),
+    /** Whether intake would hand anything out. Leaves the cursor alone; unreadable Mail is "no". */
+    hasNewMail: intakeAfter.pipe(
+      Effect.flatMap((start) => read({ app: "mail", start, limit: 1 })),
+      Effect.map((result) => result.records.length > 0),
+      Effect.orElseSucceed(() => false),
+      Effect.withSpan("NativeWorkflows.hasNewMail"),
     ),
     run: Effect.fn("NativeWorkflows.run")(
       function* (input: typeof NativeWorkflowInput.Type) {

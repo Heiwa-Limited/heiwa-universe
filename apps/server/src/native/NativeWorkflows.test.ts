@@ -44,9 +44,11 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
           truncated: false,
         });
       mailStarts.push(input.start);
-      const records = mail;
-      mail = [];
-      return Effect.succeed({ records, truncated: false });
+      const after = Date.parse(input.start ?? "");
+      return Effect.succeed({
+        records: mail.filter((record) => !(Date.parse(record.start ?? "") < after)),
+        truncated: false,
+      });
     },
     inspect: () => Effect.succeed(snapshot),
     apply: (action, expected) => {
@@ -66,7 +68,7 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
     appliedFields: () => applied,
     mailStarts: () => mailStarts,
     deliverMail: (received: string) => {
-      mail = [{ ...snapshot, app: "mail", id: received, title: "Hello", start: received }];
+      mail = [...mail, { ...snapshot, app: "mail", id: received, title: "Hello", start: received }];
     },
     renameResource: () => {
       currentResource = { ...resource, title: "Renamed list" };
@@ -222,6 +224,9 @@ describe("native workflow authority", () => {
       const proposal = yield* service.propose({ ...create, source });
       assert.deepStrictEqual(proposal.source, { ...source, title: "Before" });
       assert.deepStrictEqual((yield* service.status).pending[0]?.source, proposal.source);
+      // Staging the same change again returns the first instead of adding a second entry.
+      assert.equal((yield* service.propose({ ...create, source })).id, proposal.id);
+      assert.equal((yield* service.status).pending.length, 1);
       yield* service.approve(proposal.id, true);
       assert.isFalse(f.appliedFields().includes("source"));
       assert.equal(
@@ -241,15 +246,22 @@ describe("native workflow authority", () => {
         service
           .run({ workflow: "mail-intake" })
           .pipe(Effect.map((result) => result.sources[0]?.records.length));
+      assert.equal(yield* service.hasNewMail, false);
       f.deliverMail("2026-11-14T10:00:00Z");
+      assert.equal(yield* service.hasNewMail, true);
       assert.equal(yield* intake(), 1);
+      assert.equal(yield* service.hasNewMail, false);
       assert.equal(yield* intake(), 0);
       f.deliverMail("2026-11-14T11:30:00Z");
       assert.equal(yield* intake(), 1);
       yield* intake();
-      // The first run looks back a day from the test clock's epoch; later runs start after what was handed out.
+      // The first run looks back a day from the test clock's epoch; later runs start after what
+      // was handed out. Asking whether mail is waiting reads from the cursor without moving it.
       assert.deepStrictEqual(f.mailStarts(), [
         "1969-12-31T00:00:00Z",
+        "1969-12-31T00:00:00Z",
+        "1969-12-31T00:00:00Z",
+        "2026-11-14T10:00:01Z",
         "2026-11-14T10:00:01Z",
         "2026-11-14T10:00:01Z",
         "2026-11-14T11:30:01Z",

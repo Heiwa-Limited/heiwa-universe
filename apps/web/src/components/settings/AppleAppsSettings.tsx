@@ -1,10 +1,25 @@
 import { useState } from "react";
-import { AuthSettingsWriteScope, type NativeApp, type NativeResource } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
+import {
+  AuthSettingsWriteScope,
+  type EnvironmentId,
+  LOCAL_PROVIDER_INSTANCE_ID,
+  MAIL_INTAKE_PROMPT,
+  MAIL_INTAKE_TASK_ID,
+  type NativeApp,
+  type NativeResource,
+} from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import { AppleIcon, RefreshCwIcon } from "lucide-react";
-import { nativeInventory, nativeSelect, nativeStatus } from "../../state/native";
+import {
+  ensureScratchProject,
+  nativeInventory,
+  nativeSelect,
+  nativeStatus,
+} from "../../state/native";
+import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { readEnvironmentScope } from "../../state/session";
@@ -19,6 +34,80 @@ const apps = [
   { id: "notes", label: "Notes", noun: "folders", one: "folder" },
   { id: "mail", label: "Mail", noun: "mailboxes", one: "mailbox" },
 ] as const;
+function InboxWatch(props: {
+  readonly environmentId: EnvironmentId;
+  readonly disabled: boolean;
+  readonly hasCalendar: boolean;
+  readonly run: <A, E>(command: () => Promise<AtomCommandResult<A, E>>) => Promise<A | null>;
+}) {
+  const { environmentId } = props;
+  const tasks = useEnvironmentQuery(
+    serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
+  );
+  const providers =
+    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+  const scratch = useAtomCommand(ensureScratchProject);
+  const upsertTask = useAtomCommand(serverEnvironment.upsertScheduledTask);
+  const setTaskEnabled = useAtomCommand(serverEnvironment.setScheduledTaskEnabled);
+  const watch = tasks.data?.tasks.find((task) => task.id === MAIL_INTAKE_TASK_ID);
+  const local = providers.find(
+    (provider) =>
+      provider.instanceId === LOCAL_PROVIDER_INSTANCE_ID && provider.enabled && provider.installed,
+  );
+  const model = (local?.models.find((entry) => entry.isDefault) ?? local?.models[0])?.slug;
+  // An existing watch is only paused and resumed, so edits made under Scheduled tasks survive.
+  const blocked = watch
+    ? null
+    : !props.hasCalendar
+      ? "Select a calendar first, so there is somewhere to put events."
+      : !model
+        ? "Connect a local model under Providers first."
+        : null;
+  const setWatching = async (enabled: boolean) => {
+    if (watch) {
+      await props.run(() => setTaskEnabled({ environmentId, input: { id: watch.id, enabled } }));
+      return;
+    }
+    if (!model) return;
+    const project = await props.run(() => scratch({ environmentId, input: {} }));
+    if (project === null) return;
+    await props.run(() =>
+      upsertTask({
+        environmentId,
+        input: {
+          id: MAIL_INTAKE_TASK_ID,
+          title: "Mail intake",
+          prompt: MAIL_INTAKE_PROMPT,
+          enabled: true,
+          schedule: { type: "interval", everyMs: 15 * 60_000 },
+          projectId: project.projectId,
+          workspaceStrategy: { type: "root" },
+          modelSelection: { instanceId: LOCAL_PROVIDER_INSTANCE_ID, model },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          creationSource: "web",
+        },
+      }),
+    );
+  };
+  return (
+    <label className="mt-3 flex items-start gap-3 text-sm">
+      <input
+        type="checkbox"
+        checked={watch?.enabled === true}
+        disabled={props.disabled || blocked !== null}
+        onChange={(event) => void setWatching(event.currentTarget.checked)}
+      />
+      <span>
+        Watch my inbox
+        <span className="mt-1 block text-xs text-muted-foreground">
+          {blocked ??
+            "Checks for new unread mail every 15 minutes. When some arrives, a local model reads it and prepares calendar events for you to approve."}
+        </span>
+      </span>
+    </label>
+  );
+}
 export function AppleAppsSettings() {
   const { environment } = useSettingsScope();
   const environmentId = environment?.environmentId;
@@ -74,6 +163,8 @@ export function AppleAppsSettings() {
       ),
     );
   };
+  const hasCalendar =
+    (query.data?.grants.find((row) => row.app === "calendar")?.resourceIds.length ?? 0) > 0;
   const waiting = query.data?.pending.length ?? 0;
   return (
     <SettingsPageContainer>
@@ -162,6 +253,14 @@ export function AppleAppsSettings() {
                     </span>
                   </span>
                 </label>
+              ) : null}
+              {app.id === "mail" && ids.length && environmentId ? (
+                <InboxWatch
+                  environmentId={environmentId}
+                  disabled={!canManage || busy !== null}
+                  hasCalendar={hasCalendar}
+                  run={async (command) => settle(await whileBusy("mail", command))}
+                />
               ) : null}
               {rows ? (
                 <div className="mt-3 space-y-2">

@@ -1,5 +1,11 @@
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
+import { ScheduledTaskId } from "./baseSchemas.ts";
+
+/** One fixed id, so a client can find, pause and resume the inbox watch without a lookup. */
+export const MAIL_INTAKE_TASK_ID = ScheduledTaskId.make("heiwa:mail-intake");
+export const MAIL_INTAKE_PROMPT =
+  "Run mail intake once. If it returns no messages, reply 'No new mail' and stop without calling another tool. Otherwise, for each returned message that asks to meet, stage one calendar event in one of my selected calendars, then stop. Stage each event only once.";
 
 /** Civil-date round trip rejects Date.parse's silent normalization of impossible days. */
 export function isNativeInstant(value: string): boolean {
