@@ -16,6 +16,8 @@ import * as TestClock from "effect/testing/TestClock";
 
 import {
   comparisonBase,
+  crossFileTestDirectories,
+  crossFileTests,
   defaultConcurrency,
   gitLines,
   runSteps,
@@ -25,6 +27,31 @@ import {
 const GiB = 1024 ** 3;
 
 describe("check:changed", () => {
+  it("selects cross-file architecture checks even for deleted sources", () => {
+    assert.deepStrictEqual(crossFileTests(["apps/mobile/src/lib/deleted.ts"], []), [
+      "apps/mobile/src/dependency-graph.test.ts",
+    ]);
+    assert.deepStrictEqual(crossFileTests(["apps/web/src/component.tsx"], []), []);
+    assert.deepStrictEqual(crossFileTests([], ["t3"]), [
+      "apps/server/src/provider/AgentContextBudget.test.ts",
+    ]);
+  });
+
+  it("selects all rule fixtures when shared lint tooling changes", () => {
+    for (const file of [
+      "vite.config.ts",
+      "oxlint-plugin-t3code/index.ts",
+      "oxlint-plugin-t3code/utils.ts",
+      "oxlint-plugin-t3code/test/utils.ts",
+    ]) {
+      assert.deepStrictEqual(crossFileTestDirectories([file]), ["oxlint-plugin-t3code/rules"]);
+    }
+    assert.deepStrictEqual(
+      crossFileTestDirectories(["oxlint-plugin-t3code/rules/no-raw-mcp-registration.ts"]),
+      [],
+    );
+  });
+
   it("bounds the default concurrency by the scarcer of cores and available memory", () => {
     assert.strictEqual(defaultConcurrency(32, 128 * GiB), 16);
     assert.strictEqual(defaultConcurrency(32, 20 * GiB), 3);
