@@ -1,3 +1,4 @@
+import { getSourceUpdateState, runSourceUpdate } from "./methods/sourceUpdates.ts";
 import * as Effect from "effect/Effect";
 
 import { receiveProviderAuthCallback, cancelProviderAuthCallback } from "./methods/providerAuth.ts";
@@ -148,6 +149,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(pasteAsText);
   yield* ipc.handle(revealWindow);
   yield* ipc.handle(probeRemoteEditors);
+  yield* ipc.handle(getSourceUpdateState);
+  yield* ipc.handle(runSourceUpdate);
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);
   yield* ipc.handle(downloadUpdate);

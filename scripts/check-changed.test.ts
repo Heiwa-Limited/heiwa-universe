@@ -32,6 +32,10 @@ describe("check:changed", () => {
       "apps/mobile/src/dependency-graph.test.ts",
     ]);
     assert.deepStrictEqual(crossFileTests(["apps/web/src/component.tsx"], []), []);
+    assert.deepStrictEqual(crossFileTests(["apps/desktop/src/app/DesktopUserData.ts"], []), [
+      "apps/desktop/src/app/DesktopClerk.test.ts",
+      "apps/desktop/src/app/DesktopAppIdentity.test.ts",
+    ]);
     assert.deepStrictEqual(crossFileTests([], ["t3"]), [
       "apps/server/src/provider/AgentContextBudget.test.ts",
     ]);

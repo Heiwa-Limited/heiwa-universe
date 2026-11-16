@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import type { DesktopSourceState, DesktopSourceRequest } from "./desktopSourceUpdates.ts";
 import type { PreviewCaptureFailureEncoded } from "./previewCapture.ts";
 
 import { SnapShotSource } from "./chatAttachment.ts";
@@ -1111,6 +1112,10 @@ export interface DesktopBridge {
   getWindowFullscreenState: () => boolean;
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void;
   getWindowZoomFactor: () => number;
+  sourceUpdates?: {
+    getState: () => Promise<DesktopSourceState>;
+    run: (request: DesktopSourceRequest) => Promise<DesktopSourceState>;
+  };
   getUpdateState: () => Promise<DesktopUpdateState>;
   /** `minimumVersion` is a track switch's checked release; nothing older is offered after. */
   setUpdateChannel: (

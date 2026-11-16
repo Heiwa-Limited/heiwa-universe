@@ -1,8 +1,15 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { assert, describe, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 
 import { isDesktopPreviewVersion, resolveDesktopUpdateChannel } from "./build-desktop-artifact.ts";
 import {
+  channelCheckMessage,
+  isHeiwaSource,
   channelBuildVersion,
   classifyDatabase,
   parseMigrationManifest,
@@ -23,6 +30,16 @@ describe("classifyDatabase", () => {
     { name: "same head", recorded: known, kind: "current" },
     { name: "older head", recorded: known.slice(0, 1), kind: "upgrade" },
     { name: "empty history", recorded: [], kind: "upgrade" },
+    {
+      name: "same id with different migration",
+      recorded: [[77, "OtherBranch"]] as Migration[],
+      kind: "newer",
+    },
+    {
+      name: "missing historical migration",
+      recorded: [[75, "UnknownHistory"]] as Migration[],
+      kind: "newer",
+    },
     {
       name: "migration the build does not know",
       recorded: [...known, [78, "FromNewerBuild"] as Migration],
@@ -45,7 +62,7 @@ describe("selectRestoreSnapshot", () => {
     file: `/backups/${takenAt}.sqlite`,
     takenAt,
     reason: "test",
-    migrations: [[head, `M${head}`]],
+    migrations: head <= 77 ? known.filter(([id]) => id <= head) : [...known, [head, `M${head}`]],
   });
 
   it("picks the newest snapshot the build can read", () => {
@@ -54,6 +71,7 @@ describe("selectRestoreSnapshot", () => {
         snapshot("2026-11-01T00:00:00Z", 76),
         snapshot("2026-11-03T00:00:00Z", 78),
         snapshot("2026-11-02T00:00:00Z", 77),
+        { ...snapshot("2026-11-04T00:00:00Z", 77), migrations: [[77, "OtherBranch"]] },
       ],
       known,
     );
@@ -92,3 +110,57 @@ it("builds versions that ship without an update feed or nightly branding", () =>
   assert.isTrue(isDesktopPreviewVersion(version));
   assert.equal(resolveDesktopUpdateChannel(version), "latest");
 });
+
+it.each([
+  ["https://github.com/Heiwa-Limited/heiwa-universe.git", true],
+  ["git@github.com:Heiwa-Limited/heiwa-universe.git", true],
+  ["ssh://git@github.com/Heiwa-Limited/heiwa-universe", true],
+  ["https://github.com/Heiwa-Limited/heiwa-universe.evil", false],
+  ["https://github.com.evil.test/Heiwa-Limited/heiwa-universe.git", false],
+  ["https://github.com/pingdotgg/t3code.git", false],
+  ["https://github.com/Heiwa-Limited/heiwa-universe.git?redirect=evil", false],
+])("validates the update authority: %s", (remote, allowed) => {
+  assert.equal(isHeiwaSource(remote), allowed);
+});
+
+it.each([
+  ["same", "Up to date with dev (0123456789ab)."],
+  [
+    "ahead",
+    "This app is a local build ahead of dev (0123456789ab). Updating would replace it with the older dev.",
+  ],
+  ["other", "Latest dev: 0123456789ab. Ready to install."],
+] as const)("a check against an installed build that is %s says so", (relation, message) => {
+  assert.equal(channelCheckMessage("dev", "0123456789abcdef", relation), message);
+});
+
+it.live("a second installer cannot overwrite the active operation receipt", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const directory = yield* fs.makeTempDirectoryScoped();
+    yield* fs.makeDirectory(path.join(directory, ".lock"));
+    const receipt = path.join(directory, "app-operation.json");
+    yield* fs.writeFileString(receipt, "original operation receipt");
+    const script = yield* path.fromFileUrl(new URL("./desktop-channel.ts", import.meta.url));
+    const child = yield* spawner.spawn(
+      ChildProcess.make(process.execPath, [
+        script,
+        "app-action",
+        "check",
+        "dev",
+        "--cache-dir",
+        directory,
+        "--app",
+        path.join(directory, "Heiwa.app"),
+        "--data-dir",
+        path.join(directory, "profile"),
+        "--backup-dir",
+        path.join(directory, "backups"),
+      ]),
+    );
+    assert.notEqual(yield* child.exitCode, 0);
+    assert.equal(yield* fs.readFileString(receipt), "original operation receipt");
+  }).pipe(Effect.provide(NodeServices.layer)),
+);

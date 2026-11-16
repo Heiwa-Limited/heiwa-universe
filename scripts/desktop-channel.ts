@@ -1,5 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off - node:sqlite has no Effect wrapper; reads and backups are one-shot.
 import * as NodeSqlite from "node:sqlite";
+import {
+  DesktopSourceOperation,
+  DesktopSourceRegistration,
+  DesktopSourceAction,
+} from "@t3tools/contracts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -112,7 +117,7 @@ export type DatabaseVerdict =
   | { readonly kind: "upgrade"; readonly from: number; readonly to: number }
   | { readonly kind: "newer"; readonly unknown: ReadonlyArray<string> };
 
-/** Same rule as the server's service preflight: a recorded id above the build's head is unsafe. */
+/** Channels must agree on every recorded migration, including historical names. */
 export function classifyDatabase(
   recorded: RecordedMigrations,
   known: ReadonlyArray<Migration>,
@@ -120,7 +125,10 @@ export function classifyDatabase(
   if (recorded === "missing") return { kind: "missing" };
   if (recorded === null) return { kind: "unreadable" };
   const knownHead = migrationHead(known);
-  const unknown = recorded.filter(([id]) => id > knownHead).map(([id, name]) => `${id}_${name}`);
+  const names = new Map(known);
+  const unknown = recorded
+    .filter(([id, name]) => names.get(id) !== name)
+    .map(([id, name]) => `${id}_${name}`);
   if (unknown.length > 0) return { kind: "newer", unknown };
   const recordedHead = migrationHead(recorded);
   return knownHead > recordedHead
@@ -133,9 +141,11 @@ export function selectRestoreSnapshot(
   snapshots: ReadonlyArray<SnapshotRecord>,
   known: ReadonlyArray<Migration>,
 ): SnapshotRecord | undefined {
-  const knownHead = migrationHead(known);
   return snapshots
-    .filter((snapshot) => migrationHead(snapshot.migrations) <= knownHead)
+    .filter((snapshot) => {
+      const verdict = classifyDatabase(snapshot.migrations, known);
+      return verdict.kind === "current" || verdict.kind === "upgrade";
+    })
     .toSorted((a, b) => b.takenAt.localeCompare(a.takenAt))[0];
 }
 
@@ -150,6 +160,7 @@ interface Paths {
   readonly rollbackApp: string;
   readonly statePath: string;
   readonly logs: string;
+  readonly backupDir: string;
   readonly snapshots: string;
   readonly displaced: string;
 }
@@ -183,6 +194,7 @@ const resolvePaths = Effect.fn("desktopChannel.resolvePaths")(function* (flags: 
     rollbackApp: path.join(cacheDir, "rollback", APP_NAME),
     statePath: path.join(cacheDir, "state.json"),
     logs: path.join(cacheDir, "logs"),
+    backupDir,
     snapshots: path.join(backupDir, "snapshots"),
     displaced: path.join(backupDir, "displaced"),
   } satisfies Paths;
@@ -312,6 +324,20 @@ const readBundle = Effect.fn("desktopChannel.readBundle")(function* (appPath: st
     marker,
   });
 });
+
+/** An unset default follows the installed app, so checking never silently switches channel. */
+const trackedChannel = (
+  state: { readonly defaultChannel?: Channel | undefined },
+  installed: Option.Option<BundleInfo>,
+) =>
+  state.defaultChannel ??
+  Option.getOrElse(
+    Option.map(
+      Option.flatMap(installed, (bundle) => bundle.marker),
+      (marker) => marker.channel,
+    ),
+    () => DEFAULT_CHANNEL,
+  );
 
 const describeBundle = (bundle: BundleInfo) =>
   Option.match(bundle.marker, {
@@ -533,11 +559,39 @@ interface Target {
   readonly migrations: ReadonlyArray<Migration>;
 }
 
-const fetchChannel = (paths: Paths, channel: Channel) =>
-  git(
+/** A local build that already contains the channel tip must not be offered as an update. */
+export function channelCheckMessage(
+  channel: Channel,
+  target: string,
+  installed: "same" | "ahead" | "other",
+): string {
+  const short = target.slice(0, 12);
+  if (installed === "same") return `Up to date with ${channel} (${short}).`;
+  if (installed === "ahead")
+    return `This app is a local build ahead of ${channel} (${short}). Updating would replace it with the older ${channel}.`;
+  return `Latest ${channel}: ${short}. Ready to install.`;
+}
+
+export function isHeiwaSource(remote: string): boolean {
+  return /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)Heiwa-Limited\/heiwa-universe(?:\.git)?$/.test(
+    remote,
+  );
+}
+
+const fetchChannel = Effect.fn("desktopChannel.fetchChannel")(function* (
+  paths: Paths,
+  channel: Channel,
+) {
+  const remote = (yield* git(["remote", "get-url", "origin"], paths.repoRoot)).trim();
+  if (!isHeiwaSource(remote))
+    return yield* fail(
+      "Updates require origin to be the Heiwa-Limited/heiwa-universe GitHub repository.",
+    );
+  return yield* git(
     ["fetch", "--quiet", "origin", `+refs/heads/${channel}:refs/remotes/origin/${channel}`],
     paths.repoRoot,
   );
+});
 
 const resolveTarget = Effect.fn("desktopChannel.resolveTarget")(function* (
   paths: Paths,
@@ -818,6 +872,7 @@ const installBundle = Effect.fn("desktopChannel.installBundle")(function* (
   const currentKey = Option.flatMap(current, (bundle) => Option.map(bundle.marker, buildKey));
   // Reinstalling the same build would push the useful rollback copy out.
   if (Option.isSome(sourceKey) && Option.contains(currentKey, sourceKey.value)) {
+    yield* registerUpdater(paths);
     yield* Console.log(`${label} is already installed at ${paths.app}; nothing to do.`);
     return;
   }
@@ -906,6 +961,7 @@ const installBundle = Effect.fn("desktopChannel.installBundle")(function* (
     },
   };
   yield* writeState(paths, state);
+  yield* registerUpdater(paths);
   yield* Console.log(`Installed ${label} at ${paths.app}.`);
   if (Option.isSome(installed)) {
     yield* Console.log(`Rollback copy: ${describeBundle(installed.value)} at ${paths.rollbackApp}`);
@@ -1028,7 +1084,7 @@ const status = Effect.fn("desktopChannel.status")(function* (paths: Paths, offli
     }
   }
   lines.push(
-    `Default    ${state.defaultChannel ?? DEFAULT_CHANNEL}${state.defaultChannel ? "" : " (unset; built-in default)"}`,
+    `Default    ${trackedChannel(state, installed)}${state.defaultChannel ? "" : " (unset; follows the installed app)"}`,
   );
   const rollback = yield* readBundle(paths.rollbackApp);
   lines.push(
@@ -1095,6 +1151,139 @@ const installFlags = {
   ),
 };
 
+const encodeRegistration = Schema.encodeEffect(Schema.fromJsonString(DesktopSourceRegistration));
+const encodeOperation = Schema.encodeEffect(Schema.fromJsonString(DesktopSourceOperation));
+
+const registerUpdater = Effect.fn("desktopChannel.registerUpdater")(function* (paths: Paths) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const env = yield* HostProcess.Environment;
+  const registration: DesktopSourceRegistration = {
+    node: yield* HostProcess.ExecutablePath,
+    script: path.join(paths.repoRoot, "scripts", "desktop-channel.ts"),
+    path: env.PATH ?? "/usr/bin:/bin:/usr/sbin:/sbin",
+    app: paths.app,
+    dataDir: paths.dataDir,
+    cacheDir: paths.cacheDir,
+    backupDir: paths.backupDir,
+  };
+  yield* fs.makeDirectory(path.join(paths.dataDir, "userdata"), { recursive: true });
+  yield* fs.writeFileString(
+    path.join(paths.dataDir, "userdata", "desktop-source-updater.json"),
+    yield* encodeRegistration(registration),
+    { mode: 0o600 },
+  );
+});
+
+const appActionCommand = Command.make(
+  "app-action",
+  {
+    action: Argument.Literals("action", DesktopSourceAction.literals),
+    channel: Argument.Literals("channel", CHANNELS),
+    ...pathFlags,
+  },
+  (flags) =>
+    Effect.gen(function* () {
+      const paths = yield* resolvePaths(flags);
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const receipt = path.join(paths.cacheDir, "app-operation.json");
+      let started = false;
+      let operation: DesktopSourceOperation = {
+        action: flags.action,
+        channel: flags.channel,
+        pid: process.pid,
+        status: "running",
+        message:
+          flags.action === "check"
+            ? "Checking GitHub…"
+            : "Preparing the app. Heiwa will restart after installation.",
+        logPath: path.join(paths.cacheDir, "app-update.log"),
+        targetCommit: null,
+      };
+      const save = () =>
+        encodeOperation(operation).pipe(
+          Effect.flatMap((json) => fs.writeFileString(`${receipt}.tmp`, json, { mode: 0o600 })),
+          Effect.andThen(fs.rename(`${receipt}.tmp`, receipt)),
+        );
+      yield* withLock(
+        paths,
+        Effect.gen(function* () {
+          yield* save();
+          started = true;
+          if (process.send) yield* Effect.sync(() => process.send?.("ready"));
+          if (flags.action === "check") {
+            const target = yield* resolveTarget(paths, flags.channel);
+            yield* checkDatabase(paths, target.migrations, flags.channel, false);
+            const installedCommit = Option.getOrUndefined(
+              Option.map(
+                Option.flatMap(yield* readBundle(paths.app), (bundle) => bundle.marker),
+                (marker) => marker.commit,
+              ),
+            );
+            const relation =
+              installedCommit === target.commit
+                ? "same"
+                : installedCommit !== undefined &&
+                    (yield* succeeds(
+                      "git",
+                      ["merge-base", "--is-ancestor", target.commit, installedCommit],
+                      paths.repoRoot,
+                    ))
+                  ? "ahead"
+                  : "other";
+            operation = {
+              ...operation,
+              targetCommit: target.commit,
+              message: channelCheckMessage(flags.channel, target.commit, relation),
+            };
+          } else if (flags.action === "update") {
+            yield* installChannel(paths, flags.channel, {
+              preferCache: false,
+              restoreSnapshot: false,
+              allowAdhoc: false,
+            });
+            const state = yield* readState(paths);
+            yield* writeState(paths, { ...state, defaultChannel: flags.channel });
+            operation = {
+              ...operation,
+              message: `Installed latest ${flags.channel}. Restarting Heiwa.`,
+            };
+          } else {
+            const rollback = yield* readBundle(paths.rollbackApp);
+            if (Option.isNone(rollback)) return yield* fail("No previous app is available.");
+            yield* installBundle(paths, yield* verifyBundle(rollback.value.path), {
+              consumeSource: true,
+              restoreSnapshot: false,
+              origin: "rollback",
+            });
+            operation = { ...operation, message: "Restored the previous app. Restarting Heiwa." };
+          }
+          if (flags.action !== "check") yield* run("open", [paths.app]);
+          operation = { ...operation, status: "succeeded" };
+        }),
+      ).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            operation = {
+              ...operation,
+              status: "failed",
+              message: error instanceof Error ? error.message : String(error),
+            };
+          }),
+        ),
+      );
+      if (started) yield* save();
+      else yield* Console.error(operation.message);
+      if (operation.status === "failed") {
+        yield* Effect.sync(() => (process.exitCode = 1));
+        if (started && flags.action !== "check" && (yield* fs.exists(paths.app))) {
+          yield* run("open", [paths.app]).pipe(Effect.ignore);
+        }
+      }
+    }),
+);
+
 const statusCommand = Command.make(
   "status",
   {
@@ -1114,7 +1303,7 @@ const installCommand = Command.make(
     Effect.gen(function* () {
       const paths = yield* resolvePaths(flags);
       const state = yield* readState(paths);
-      const tracked = state.defaultChannel ?? DEFAULT_CHANNEL;
+      const tracked = trackedChannel(state, yield* readBundle(paths.app));
       const channel = Option.getOrElse(flags.channel, () => tracked);
       if (channel !== tracked) {
         yield* Console.log(`One-off install of ${channel}; this machine still tracks ${tracked}.`);
@@ -1189,7 +1378,13 @@ const main = Command.make("desktop-channel").pipe(
   Command.withDescription(
     "Install and switch between Heiwa desktop builds of origin/dev and origin/main.",
   ),
-  Command.withSubcommands([statusCommand, installCommand, switchCommand, rollbackCommand]),
+  Command.withSubcommands([
+    statusCommand,
+    installCommand,
+    switchCommand,
+    rollbackCommand,
+    appActionCommand,
+  ]),
 );
 
 if (import.meta.main) {

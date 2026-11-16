@@ -22,11 +22,24 @@ it.effect.each(["darwin", "win32", "linux"] as const)(
       for (const isDevelopment of [false, true]) {
         const result = yield* resolveUserDataPath({
           appDataDirectory: directory,
+          baseDir: path.join(directory, ".heiwa"),
+          homeDirectory: directory,
           isDevelopment,
           platform,
         });
         assert.equal(result, path.join(directory, isDevelopment ? "Heiwa Dev" : "Heiwa"));
         assert.isFalse(yield* fs.exists(path.join(result, "Local State")));
+        const isolated = path.join(directory, "isolated-profile");
+        assert.equal(
+          yield* resolveUserDataPath({
+            appDataDirectory: directory,
+            isDevelopment,
+            platform,
+            baseDir: isolated,
+            homeDirectory: directory,
+          }),
+          path.join(isolated, "electron", isDevelopment ? "development" : "desktop"),
+        );
       }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

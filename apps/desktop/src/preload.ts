@@ -265,6 +265,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(IpcChannels.WINDOW_FULLSCREEN_STATE_CHANNEL, wrappedListener);
     };
   },
+  sourceUpdates: {
+    getState: () => ipcRenderer.invoke(IpcChannels.SOURCE_UPDATE_STATE_CHANNEL),
+    run: (request) => ipcRenderer.invoke(IpcChannels.SOURCE_UPDATE_RUN_CHANNEL, request),
+  },
   getUpdateState: () => ipcRenderer.invoke(IpcChannels.UPDATE_GET_STATE_CHANNEL),
   setUpdateChannel: (channel, minimumVersion) =>
     ipcRenderer.invoke(IpcChannels.UPDATE_SET_CHANNEL_CHANNEL, { channel, minimumVersion }),

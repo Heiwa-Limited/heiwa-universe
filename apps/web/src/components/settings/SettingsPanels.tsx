@@ -1,3 +1,5 @@
+import { SourceUpdatesSettings } from "./SourceUpdatesSettings";
+import { managedSourceUpdates } from "./sourceUpdates";
 import { useAtomValue } from "@effect/atom-react";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
@@ -150,6 +152,18 @@ function AboutVersionTitle() {
 }
 
 function AboutVersionSection() {
+  if (managedSourceUpdates()) {
+    return (
+      <>
+        <SourceUpdatesSettings />
+        <CliCommandSettingsRow />
+      </>
+    );
+  }
+  return <ReleaseVersionSection />;
+}
+
+function ReleaseVersionSection() {
   const updateState = useDesktopUpdateState();
   const [switchChannel, setSwitchChannel] = useState<DesktopUpdateChannel | null>(null);
   const [isUpdateActionPending, setIsUpdateActionPending] = useState(false);

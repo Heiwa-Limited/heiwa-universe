@@ -1,4 +1,4 @@
-import type { DesktopUpdateState } from "@t3tools/contracts";
+import type { DesktopSourceState, DesktopUpdateState } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
@@ -32,6 +32,11 @@ vi.mock("../../state/desktopUpdate", async (importOriginal) => ({
 vi.mock("../../env", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../env")>()),
   isElectron: true,
+}));
+// A source-built preview; only a bridge with the source updater makes it a managed one.
+vi.mock("../../branding", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../branding")>()),
+  APP_VERSION: "0.4.0-preview.20261115.1",
 }));
 vi.mock("./useUpdateEverything", () => ({
   useUpdateEverything: () => ({
@@ -128,5 +133,45 @@ describe("SidebarUpdatePill update everything", () => {
 
     await userEvent.keyboard("{Escape}");
     await vi.waitFor(() => expect(document.activeElement).toBe(button.element()));
+  });
+});
+
+describe("SidebarUpdatePill source previews", () => {
+  const disabledFeed: DesktopUpdateState = {
+    ...nightlyUpdate([]),
+    enabled: false,
+    status: "disabled",
+    availableVersion: null,
+    message: "This build has no release feed.",
+  };
+  const source: DesktopSourceState = {
+    supported: true,
+    reason: null,
+    trackedChannel: "main",
+    rollbackAvailable: false,
+    installed: { channel: "main", commit: "0123456789abcdef", version: "0.4.0-preview.20261115.1" },
+    operation: null,
+  };
+
+  it("reports the disabled feed when this build has no source updater", async () => {
+    setup(disabledFeed);
+    await using screen = await render(<SidebarUpdatePill />);
+    await expect
+      .element(screen.getByRole("button", { name: /^Updates unavailable/ }))
+      .toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("opens About and checks the followed channel instead of the disabled feed", async () => {
+    setup(disabledFeed);
+    const getState = vi.fn(async () => source);
+    const run = vi.fn(async () => source);
+    vi.stubGlobal("desktopBridge", { sourceUpdates: { getState, run } });
+    using _bridge = { [Symbol.dispose]: () => vi.unstubAllGlobals() };
+    await using screen = await render(<SidebarUpdatePill />);
+    await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    await vi.waitFor(() =>
+      expect(run).toHaveBeenCalledExactlyOnceWith({ action: "check", channel: "main" }),
+    );
+    expect(screen.router?.state.location.pathname).toBe("/settings/about");
   });
 });

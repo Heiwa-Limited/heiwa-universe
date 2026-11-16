@@ -1,3 +1,4 @@
+import { PRODUCT_DATA_DIRECTORY } from "@t3tools/shared/product";
 import * as Effect from "effect/Effect";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
@@ -33,11 +34,16 @@ export class DesktopUserDataInitializationError extends Schema.TaggedError<Deskt
 export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPath")(
   function* (input: {
     readonly appDataDirectory: string;
+    readonly baseDir: string;
+    readonly homeDirectory: string;
     readonly isDevelopment: boolean;
     readonly platform: NodeJS.Platform;
   }) {
     const path = yield* Path.Path;
-    // Heiwa never reads or migrates another product's browser credentials.
+    if (path.resolve(input.baseDir) !== path.resolve(input.homeDirectory, PRODUCT_DATA_DIRECTORY)) {
+      return path.join(input.baseDir, "electron", input.isDevelopment ? "development" : "desktop");
+    }
+    // Preserve the canonical installation's existing browser credentials.
     return path.join(input.appDataDirectory, input.isDevelopment ? "Heiwa Dev" : "Heiwa");
   },
 );

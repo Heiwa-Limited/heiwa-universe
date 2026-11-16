@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import { SOURCE_UPDATES_MENU_ACTION } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -57,7 +58,7 @@ const layerElectronDialog = Layer.succeed(ElectronDialog.ElectronDialog, {
   showErrorBox: () => Effect.void,
 } satisfies ElectronDialog.ElectronDialog["Service"]);
 
-const layerDesktopUpdates = Layer.succeed(DesktopUpdates.DesktopUpdates, {
+const desktopUpdates = {
   getState: Effect.die("unexpected getState"),
   isActionActive: Effect.succeed(false),
   isInstallActive: Effect.succeed(false),
@@ -70,7 +71,8 @@ const layerDesktopUpdates = Layer.succeed(DesktopUpdates.DesktopUpdates, {
   download: Effect.die("unexpected download"),
   install: Effect.die("unexpected install"),
   installPrepared: () => Effect.die("unexpected installPrepared"),
-} satisfies DesktopUpdates.DesktopUpdates["Service"]);
+} satisfies DesktopUpdates.DesktopUpdates["Service"];
+const layerDesktopUpdates = Layer.succeed(DesktopUpdates.DesktopUpdates, desktopUpdates);
 
 const layerDesktopWindow = (selectedAction: Deferred.Deferred<string>) =>
   Layer.succeed(DesktopWindow.DesktopWindow, {
@@ -107,6 +109,7 @@ const configureMenu = (
   selectedAction: Deferred.Deferred<string>,
   applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
   environment: Partial<DesktopEnvironment.MakeDesktopEnvironmentInput> = {},
+  updates: Layer.Layer<DesktopUpdates.DesktopUpdates> = layerDesktopUpdates,
 ) =>
   Effect.gen(function* () {
     const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
@@ -116,7 +119,7 @@ const configureMenu = (
       DesktopApplicationMenu.layer.pipe(
         Layer.provideMerge(layerElectronMenu(applicationMenuTemplate)),
         Layer.provideMerge(layerDesktopWindow(selectedAction)),
-        Layer.provideMerge(layerDesktopUpdates),
+        Layer.provideMerge(updates),
         Layer.provideMerge(layerElectronDialog),
         Layer.provideMerge(layerElectronApp),
         Layer.provideMerge(
@@ -232,6 +235,54 @@ describe("DesktopApplicationMenu", () => {
         );
       }
     }),
+  );
+
+  it.effect(
+    "sends Check for Updates to the source updater in previews and the feed otherwise",
+    () =>
+      Effect.gen(function* () {
+        const clickCheckForUpdates = Effect.fn(function* (appVersion: string) {
+          const selectedAction = yield* Deferred.make<string>();
+          const feedChecked = yield* Deferred.make<void>();
+          const applicationMenuTemplate =
+            yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+          const updates = Layer.succeed(DesktopUpdates.DesktopUpdates, {
+            ...desktopUpdates,
+            check: () =>
+              Deferred.succeed(feedChecked, undefined).pipe(
+                Effect.as({ state: { status: "checking" } } as never),
+              ),
+          });
+          yield* configureMenu(
+            selectedAction,
+            applicationMenuTemplate,
+            { platform: "darwin", appVersion },
+            updates,
+          );
+          const items: Electron.MenuItemConstructorOptions[] = [];
+          const collect = (template: readonly Electron.MenuItemConstructorOptions[]) => {
+            for (const item of template) {
+              items.push(item);
+              if (Array.isArray(item.submenu)) collect(item.submenu);
+            }
+          };
+          collect(yield* Deferred.await(applicationMenuTemplate));
+          const check = items.find((item) => item.label === "Check for Updates...");
+          if (typeof check?.click !== "function") {
+            throw new Error("Expected Check for Updates menu item to have a click handler.");
+          }
+          check.click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+          return { selectedAction, feedChecked };
+        });
+
+        const preview = yield* clickCheckForUpdates("0.4.0-preview.20261115.1");
+        assert.equal(yield* Deferred.await(preview.selectedAction), SOURCE_UPDATES_MENU_ACTION);
+        assert.isFalse(yield* Deferred.isDone(preview.feedChecked));
+
+        const release = yield* clickCheckForUpdates("1.2.3");
+        yield* Deferred.await(release.feedChecked);
+        assert.isFalse(yield* Deferred.isDone(release.selectedAction));
+      }),
   );
 
   it.effect("reloads the main window even while a browser page has focus", () =>

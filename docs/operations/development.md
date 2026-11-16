@@ -286,6 +286,20 @@ passed as `--wsl-runtime`; see the
 
 ### Installing the dev or main channel
 
+Managed macOS previews expose **Settings → About → App updates**: choose Development
+(`dev`) or Stable (`main`), check GitHub, then **Update & Restart**. The selection becomes
+this machine's followed channel only after a successful install. Both the UI and CLI use
+the same installer. The UI always fetches the selected branch tip; it never installs a stale
+channel cache or restores an older database automatically.
+
+The first installation of a build containing these controls must use the CLI below. It
+registers the local Node executable, source checkout and build PATH in
+`~/.heiwa/userdata/desktop-source-updater.json`. Keep that checkout and toolchain available.
+The detached helper survives app shutdown and leaves `app-operation.json` plus
+`app-update.log` in the registered build cache. A development window or another data profile
+cannot replace the canonical installed app. These are source-build controls, not a
+published binary release feed.
+
 Heiwa has no release feed yet. On the owner's Mac, `~/Applications/Heiwa.app` is built from the
 tip of `origin/dev` or `origin/main` with:
 

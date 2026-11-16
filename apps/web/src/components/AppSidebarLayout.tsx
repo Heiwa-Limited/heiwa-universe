@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
+import { SOURCE_UPDATES_MENU_ACTION } from "@t3tools/contracts";
 import {
   useEffect,
   useState,
@@ -63,6 +64,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
+import { openSourceUpdates } from "./settings/sourceUpdates";
 import { resolveThreadRouteRef } from "../threadRoutes";
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
@@ -305,6 +307,9 @@ function registerAppShellCommands(router: AnyRouter, shellElement: Element): () 
     registerMenuAction("open-settings", () => {
       if (!/^\/settings(\/|$)/.test(router.state.location.pathname))
         void router.navigate({ to: "/settings" });
+    }),
+    registerMenuAction(SOURCE_UPDATES_MENU_ACTION, () => {
+      void openSourceUpdates((options) => router.navigate(options));
     }),
   ];
   return () => {
