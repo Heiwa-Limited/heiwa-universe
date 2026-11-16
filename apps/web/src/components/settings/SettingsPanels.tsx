@@ -1,4 +1,5 @@
 import { SourceUpdatesSettings } from "./SourceUpdatesSettings";
+import { managedSourceUpdates } from "./sourceUpdates";
 import { useAtomValue } from "@effect/atom-react";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
@@ -151,7 +152,7 @@ function AboutVersionTitle() {
 }
 
 function AboutVersionSection() {
-  if (window.desktopBridge?.sourceUpdates && APP_VERSION.includes("-preview.")) {
+  if (managedSourceUpdates()) {
     return (
       <>
         <SourceUpdatesSettings />

@@ -47,3 +47,8 @@ export const DesktopSourceRegistration = Schema.Struct({
   backupDir: Schema.String,
 });
 export type DesktopSourceRegistration = typeof DesktopSourceRegistration.Type;
+
+/** Source-built previews update through the local installer, never the release feed. */
+export const isSourcePreviewVersion = (version: string) => version.includes("-preview.");
+/** Menu action that asks the renderer to open source updates and start a check. */
+export const SOURCE_UPDATES_MENU_ACTION = "check-source-updates";

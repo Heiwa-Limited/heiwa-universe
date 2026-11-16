@@ -1,4 +1,4 @@
-import type { DesktopAppBranding } from "@t3tools/contracts";
+import { type DesktopAppBranding, isSourcePreviewVersion } from "@t3tools/contracts";
 import { PRODUCT_NAME, PRODUCT_RELEASES_URL } from "@t3tools/shared/product";
 import { formatAppDisplayName } from "./branding.logic";
 
@@ -21,7 +21,7 @@ export const HOSTED_APP_CHANNEL_LABEL =
 export const APP_BASE_NAME = injectedDesktopAppBranding?.baseName ?? PRODUCT_NAME;
 export const APP_STAGE_LABEL =
   injectedDesktopAppBranding?.stageLabel ??
-  (APP_VERSION.includes("-preview.") ? "Preview" : HOSTED_APP_CHANNEL_LABEL) ??
+  (isSourcePreviewVersion(APP_VERSION) ? "Preview" : HOSTED_APP_CHANNEL_LABEL) ??
   (import.meta.env.DEV ? "Dev" : "Beta");
 export const APP_DISPLAY_NAME =
   injectedDesktopAppBranding?.displayName ??

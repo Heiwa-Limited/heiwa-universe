@@ -1,8 +1,9 @@
-import type {
-  DesktopAppBranding,
-  DesktopAppStageLabel,
-  DesktopRuntimeArch,
-  DesktopRuntimeInfo,
+import {
+  type DesktopAppBranding,
+  type DesktopAppStageLabel,
+  type DesktopRuntimeArch,
+  type DesktopRuntimeInfo,
+  isSourcePreviewVersion,
 } from "@t3tools/contracts";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
@@ -97,7 +98,7 @@ function resolveDesktopAppStageLabel(input: {
     return "Dev";
   }
 
-  if (input.appVersion.includes("-preview.")) return "Preview";
+  if (isSourcePreviewVersion(input.appVersion)) return "Preview";
   return isNightlyDesktopVersion(input.appVersion) ? "Nightly" : "Beta";
 }
 
