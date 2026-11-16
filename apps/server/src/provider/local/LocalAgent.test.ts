@@ -176,6 +176,30 @@ it("refuses context overflow before making a chat request and retains completed 
     }),
   ).rejects.toThrow();
   assert.deepStrictEqual(JSON.parse((saved[1] as { content: string }).content), { saved: true });
+
+  // A result too large for what is left comes back as an error the model can act on.
+  const large = setup([
+    {
+      done: true,
+      message: {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ function: { name: tool.name, arguments: {} } }],
+      },
+    },
+    { done: true, message: { role: "assistant", content: "Asked for less." } },
+  ]);
+  const answer = await runLocalTurn({
+    ...large,
+    endpoint: "http://localhost:11434",
+    model: "fixture",
+    messages: [],
+    tools: [tool],
+    execute: async () => ({ text: "y".repeat(30_000) }),
+  });
+  assert.equal(answer.text, "Asked for less.");
+  const retried = large.requests[1] as { messages: Array<{ role: string; content: string }> };
+  assert.match(retried.messages.at(-1)!.content, /exceeded the local context limit/);
 });
 it("tells the model today's date and the dates of the coming week across a month end", () => {
   const text = localAgentInstructions(

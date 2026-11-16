@@ -6,6 +6,7 @@ import {
   NativeApp,
   NativeProposal,
   NativeResource,
+  type NativeRecord,
   NativeSource,
   type NativeStatus,
   NativeWriteMode,
@@ -26,6 +27,8 @@ import * as MailIndex from "./MailIndex.ts";
 import * as NativeHost from "./NativeHost.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const INTAKE_BYTES = 6_000;
+const INTAKE_BODY_CHARS = 1_000;
 const decodeResource = Schema.decodeUnknownEffect(Schema.fromJsonString(NativeResource));
 const decodeResources = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(NativeResource)),
@@ -295,16 +298,45 @@ const make = Effect.gen(function* () {
           ? result.failure.detail
           : "This source could not be read.",
       };
+    // Oldest first within a byte budget, so a local model's context holds the batch and the
+    // cursor stops at the last message handed out; the rest arrive on the next run.
+    const trim = (record: NativeRecord): NativeRecord =>
+      record.body.length > INTAKE_BODY_CHARS
+        ? { ...record, body: `${record.body.slice(0, INTAKE_BODY_CHARS)}…` }
+        : record;
+    const oldestFirst = result.success.records
+      .map(trim)
+      .sort((a, b) => Date.parse(a.start ?? "") - Date.parse(b.start ?? ""));
+    let records: Array<NativeRecord> = [];
+    let bytes = 0;
+    for (const record of oldestFirst) {
+      const size = encodeJson(record).length;
+      if (records.length > 0 && bytes + size > INTAKE_BYTES) break;
+      records.push(record);
+      bytes += size;
+    }
+    // The cursor is one second past the newest message, so a cut never splits one second: drop
+    // the cut second, or when it is all there is, hand all of it out.
+    const cut = oldestFirst[records.length]?.start;
+    if (cut !== undefined && records.at(-1)?.start === cut) {
+      const before = records.filter((record) => record.start !== cut);
+      records = before.length > 0 ? before : oldestFirst.filter((record) => record.start === cut);
+    }
+    const trimmedAny = result.success.records.some((record) => trim(record) !== record);
     const newest = Math.max(
-      ...result.success.records
-        .map((record) => Date.parse(record.start ?? ""))
-        .filter(Number.isFinite),
+      ...records.map((record) => Date.parse(record.start ?? "")).filter(Number.isFinite),
     );
     if (Number.isFinite(newest)) {
       const next = instant(DateTime.makeUnsafe(newest + 1000));
       yield* sql`INSERT INTO heiwa_native_intake (app, after) VALUES ('mail', ${next}) ON CONFLICT(app) DO UPDATE SET after = excluded.after`;
     }
-    return { app: "mail" as const, ...result.success, error: null };
+    return {
+      app: "mail" as const,
+      records,
+      truncated:
+        result.success.truncated || trimmedAny || records.length < result.success.records.length,
+      error: null,
+    };
   });
   const requireSelection = Effect.fn("NativeWorkflows.requireSelection")(function* (
     action: typeof NativeAction.Type,

@@ -73,8 +73,18 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
     writes: () => writes,
     appliedFields: () => applied,
     mailStarts: () => mailStarts,
-    deliverMail: (received: string) => {
-      mail = [...mail, { ...snapshot, app: "mail", id: received, title: "Hello", start: received }];
+    deliverMail: (received: string, body = "") => {
+      mail = [
+        ...mail,
+        {
+          ...snapshot,
+          app: "mail",
+          id: `${received}:${mail.length}`,
+          title: "Hello",
+          body,
+          start: received,
+        },
+      ];
     },
     denyMail: (denied: boolean) => {
       mailDenied = denied;
@@ -288,6 +298,46 @@ describe("native workflow authority", () => {
         "2026-11-14T10:00:01Z",
         "2026-11-14T11:30:01Z",
       ]);
+    }).pipe(Effect.provide(f.layer));
+  });
+  it.effect("hands a large backlog out in batches a local model can hold, losing none", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const service = yield* NativeWorkflows.NativeWorkflows;
+      yield* service.select("mail", ["list-1"]);
+      const long = "x".repeat(3000);
+      // Delivered newest first; the last two share a second.
+      for (const received of [
+        "2026-11-14T10:00:06Z",
+        "2026-11-14T10:00:06Z",
+        "2026-11-14T10:00:04Z",
+        "2026-11-14T10:00:03Z",
+        "2026-11-14T10:00:02Z",
+        "2026-11-14T10:00:01Z",
+      ])
+        f.deliverMail(received, long);
+      const handed: string[] = [];
+      let batches = 0;
+      for (let run = 0; run < 6; run++) {
+        const source = (yield* service.run({ workflow: "mail-intake" })).sources[0]!;
+        if (source.records.length === 0) break;
+        assert.isTrue(source.truncated);
+        assert.isTrue(JSON.stringify(source.records).length <= 7_000);
+        assert.isTrue(source.records.every((record) => record.body.length <= 1_001));
+        handed.push(...source.records.map((record) => record.start!));
+        batches += 1;
+      }
+      assert.isAbove(batches, 1);
+      // Every message once, oldest first, and both messages of the shared second.
+      assert.deepStrictEqual(handed, [
+        "2026-11-14T10:00:01Z",
+        "2026-11-14T10:00:02Z",
+        "2026-11-14T10:00:03Z",
+        "2026-11-14T10:00:04Z",
+        "2026-11-14T10:00:06Z",
+        "2026-11-14T10:00:06Z",
+      ]);
+      assert.equal(yield* service.hasNewMail, false);
     }).pipe(Effect.provide(f.layer));
   });
   it.effect("requires exact current revision before staging an edit", () => {
