@@ -18,15 +18,17 @@ import {
   nativeInventory,
   nativeSelect,
   nativeStatus,
+  nativeStatusLive,
 } from "../../state/native";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { readEnvironmentScope } from "../../state/session";
+import { useEnvironmentScope } from "../../state/session";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer } from "./settingsLayout";
 import { SettingsGroup } from "./SettingsGroup";
 import { Button } from "../ui/button";
+import { ScheduledRelativeLabel, scheduleLabel } from "./ScheduledTasksSettings";
 
 const apps = [
   { id: "calendar", label: "Calendar", noun: "calendars", one: "calendar" },
@@ -36,7 +38,7 @@ const apps = [
 ] as const;
 function InboxWatch(props: {
   readonly environmentId: EnvironmentId;
-  readonly disabled: boolean;
+  readonly busy: boolean;
   readonly hasCalendar: boolean;
   readonly run: <A, E>(command: () => Promise<AtomCommandResult<A, E>>) => Promise<A | null>;
 }) {
@@ -44,8 +46,14 @@ function InboxWatch(props: {
   const tasks = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
   );
+  // Live, so each timer check shows up while the page is open.
+  const check = useEnvironmentQuery(nativeStatusLive({ environmentId, input: {} })).data?.mailWatch;
   const providers =
     useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+  // Watching is a scheduled task, so it needs what saving one needs, not the right to grant apps.
+  const canOperate = useAtomValue(
+    serverEnvironment.upsertScheduledTask.permissionAtom(environmentId),
+  );
   const scratch = useAtomCommand(ensureScratchProject);
   const upsertTask = useAtomCommand(serverEnvironment.upsertScheduledTask);
   const setTaskEnabled = useAtomCommand(serverEnvironment.setScheduledTaskEnabled);
@@ -95,15 +103,53 @@ function InboxWatch(props: {
       <input
         type="checkbox"
         checked={watch?.enabled === true}
-        disabled={props.disabled || blocked !== null}
+        disabled={props.busy || !canOperate || blocked !== null}
         onChange={(event) => void setWatching(event.currentTarget.checked)}
       />
       <span>
         Watch my inbox
         <span className="mt-1 block text-xs text-muted-foreground">
           {blocked ??
-            "Checks for new unread mail every 15 minutes. When some arrives, a local model reads it and prepares calendar events for you to approve."}
+            "Checks for new unread mail. When some arrives, a local model reads it and prepares calendar events for you to approve."}
         </span>
+        {watch ? (
+          <span className="mt-1 block text-xs text-muted-foreground">
+            {scheduleLabel(watch.schedule)}
+            {watch.enabled ? (
+              watch.nextRunAt !== null ? (
+                <>
+                  {" · next check "}
+                  <ScheduledRelativeLabel value={watch.nextRunAt} />
+                </>
+              ) : null
+            ) : (
+              " · paused"
+            )}
+            {check ? (
+              <>
+                {" · last checked "}
+                <ScheduledRelativeLabel value={check.checkedAt} />
+                {check.outcome === "no-new-mail"
+                  ? ", nothing new"
+                  : check.outcome === "new-mail"
+                    ? ", new mail found"
+                    : null}
+              </>
+            ) : watch.enabled ? (
+              " · not checked yet"
+            ) : null}
+          </span>
+        ) : null}
+        {watch && check?.outcome === "unreadable" ? (
+          <span role="alert" className="mt-1 block text-xs text-destructive">
+            Could not read Mail: {check.detail ?? "no detail was given."}
+          </span>
+        ) : null}
+        {watch?.lastRunStatus === "failed" ? (
+          <span role="alert" className="mt-1 block text-xs text-destructive">
+            The last run failed{watch.lastRunError ? `: ${watch.lastRunError}` : "."}
+          </span>
+        ) : null}
       </span>
     </label>
   );
@@ -111,7 +157,7 @@ function InboxWatch(props: {
 export function AppleAppsSettings() {
   const { environment } = useSettingsScope();
   const environmentId = environment?.environmentId;
-  const canManage = !!environmentId && readEnvironmentScope(environmentId, AuthSettingsWriteScope);
+  const canManage = useEnvironmentScope(environmentId ?? null, AuthSettingsWriteScope);
   const query = useEnvironmentQuery(
     environmentId ? nativeStatus({ environmentId, input: {} }) : null,
   );
@@ -257,7 +303,7 @@ export function AppleAppsSettings() {
               {app.id === "mail" && ids.length && environmentId ? (
                 <InboxWatch
                   environmentId={environmentId}
-                  disabled={!canManage || busy !== null}
+                  busy={busy !== null}
                   hasCalendar={hasCalendar}
                   run={async (command) => settle(await whileBusy("mail", command))}
                 />

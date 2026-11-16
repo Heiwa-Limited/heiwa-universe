@@ -13,6 +13,7 @@ import authorityMigration from "../persistence/Migrations/077_NativeWorkflowAuth
 import migration from "../persistence/Migrations/076_HeiwaNativeWorkflows.ts";
 import sourceMigration from "../persistence/Migrations/078_NativeProposalSource.ts";
 import intakeMigration from "../persistence/Migrations/079_NativeIntakeCursor.ts";
+import watchMigration from "../persistence/Migrations/080_NativeWatchCheck.ts";
 
 const snapshot: NativeHost.NativeSnapshot = {
   app: "reminders",
@@ -33,6 +34,7 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
   let applied: ReadonlyArray<string> = [];
   const mailStarts: Array<string | undefined> = [];
   let mail: ReadonlyArray<NativeHost.NativeSnapshot> = [];
+  let mailDenied = false;
   let currentResource = resource;
   const host = NativeHost.NativeHost.of({
     platform: "darwin",
@@ -43,6 +45,10 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
           records: ids.includes("list-1") ? [snapshot] : [],
           truncated: false,
         });
+      if (mailDenied)
+        return Effect.fail(
+          new NativeWorkflowError({ code: "permission", detail: "Allow Heiwa to control Mail." }),
+        );
       mailStarts.push(input.start);
       const after = Date.parse(input.start ?? "");
       return Effect.succeed({
@@ -70,6 +76,9 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
     deliverMail: (received: string) => {
       mail = [...mail, { ...snapshot, app: "mail", id: received, title: "Hello", start: received }];
     },
+    denyMail: (denied: boolean) => {
+      mailDenied = denied;
+    },
     renameResource: () => {
       currentResource = { ...resource, title: "Renamed list" };
     },
@@ -78,6 +87,7 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
         Effect.andThen(authorityMigration),
         Effect.andThen(sourceMigration),
         Effect.andThen(intakeMigration),
+        Effect.andThen(watchMigration),
       ),
     ).pipe(
       Layer.provideMerge(
@@ -246,11 +256,23 @@ describe("native workflow authority", () => {
         service
           .run({ workflow: "mail-intake" })
           .pipe(Effect.map((result) => result.sources[0]?.records.length));
+      const watched = () => service.status.pipe(Effect.map((status) => status.mailWatch));
+      assert.equal(yield* watched(), null);
       assert.equal(yield* service.hasNewMail, false);
+      assert.equal((yield* watched())?.outcome, "no-new-mail");
       f.deliverMail("2026-11-14T10:00:00Z");
       assert.equal(yield* service.hasNewMail, true);
+      assert.equal((yield* watched())?.outcome, "new-mail");
       assert.equal(yield* intake(), 1);
       assert.equal(yield* service.hasNewMail, false);
+      // Mail that cannot be read keeps the watch closed but says why.
+      f.denyMail(true);
+      assert.equal(yield* service.hasNewMail, false);
+      assert.deepInclude(yield* watched(), {
+        outcome: "unreadable",
+        detail: "Allow Heiwa to control Mail.",
+      });
+      f.denyMail(false);
       assert.equal(yield* intake(), 0);
       f.deliverMail("2026-11-14T11:30:00Z");
       assert.equal(yield* intake(), 1);

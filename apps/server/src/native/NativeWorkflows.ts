@@ -7,6 +7,7 @@ import {
   NativeProposal,
   NativeResource,
   NativeSource,
+  type NativeStatus,
   NativeWriteMode,
   NativeWorkflowError,
   type NativeReadInput,
@@ -478,7 +479,43 @@ const make = Effect.gen(function* () {
     yield* sql`UPDATE heiwa_native_proposals SET status = 'applied', result_json = ${encodeJson(result)} WHERE id = ${id}`;
     return { ...(yield* decodeRow(row)), status: "applied" as const, result };
   });
-  const currentStatus = status().pipe(Effect.mapError(storageError));
+  const watchCheck = Effect.fn("NativeWorkflows.watchCheck")(function* () {
+    const rows = yield* sql<{
+      checked_at: string;
+      outcome: NonNullable<(typeof NativeStatus.Type)["mailWatch"]>["outcome"];
+      detail: string | null;
+    }>`SELECT checked_at, outcome, detail FROM heiwa_native_watch WHERE app = 'mail'`;
+    const row = rows[0];
+    return row === undefined
+      ? null
+      : { checkedAt: row.checked_at, outcome: row.outcome, detail: row.detail };
+  });
+  // Workflow results embed status for the model; the watch check stays an owner-facing detail.
+  const currentStatus = Effect.gen(function* () {
+    return { ...(yield* status()), mailWatch: yield* watchCheck() };
+  }).pipe(Effect.mapError(storageError));
+  // Records every check so a watch that cannot read Mail says so instead of looking quiet.
+  const checkMail = Effect.gen(function* () {
+    const result = yield* intakeAfter.pipe(
+      Effect.flatMap((start) => read({ app: "mail", start, limit: 1 })),
+      Effect.result,
+    );
+    const outcome =
+      result._tag === "Failure"
+        ? ("unreadable" as const)
+        : result.success.records.length > 0
+          ? ("new-mail" as const)
+          : ("no-new-mail" as const);
+    const detail =
+      result._tag === "Success"
+        ? null
+        : isNativeWorkflowError(result.failure)
+          ? result.failure.detail
+          : "Mail could not be read.";
+    const checkedAt = DateTime.formatIso(yield* DateTime.now);
+    yield* sql`INSERT INTO heiwa_native_watch (app, checked_at, outcome, detail) VALUES ('mail', ${checkedAt}, ${outcome}, ${detail}) ON CONFLICT(app) DO UPDATE SET checked_at = excluded.checked_at, outcome = excluded.outcome, detail = excluded.detail`;
+    return outcome === "new-mail";
+  });
   return {
     status: currentStatus,
     subscribeStatus: Stream.unwrap(
@@ -555,9 +592,7 @@ const make = Effect.gen(function* () {
       (effect) => announcing(guarded(gate.withPermits(1)(effect))),
     ),
     /** Whether intake would hand anything out. Leaves the cursor alone; unreadable Mail is "no". */
-    hasNewMail: intakeAfter.pipe(
-      Effect.flatMap((start) => read({ app: "mail", start, limit: 1 })),
-      Effect.map((result) => result.records.length > 0),
+    hasNewMail: announcing(gate.withPermits(1)(checkMail)).pipe(
       Effect.orElseSucceed(() => false),
       Effect.withSpan("NativeWorkflows.hasNewMail"),
     ),

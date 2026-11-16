@@ -143,6 +143,11 @@ export const NativeProposal = Schema.Struct({
 });
 export type NativeProposal = typeof NativeProposal.Type;
 export const NativeWriteMode = Schema.Literals(["review", "automatic"]);
+export const NativeMailWatchCheck = Schema.Struct({
+  checkedAt: Schema.String,
+  outcome: Schema.Literals(["new-mail", "no-new-mail", "unreadable"]),
+  detail: Schema.NullOr(Schema.String),
+});
 export const NativeStatus = Schema.Struct({
   platform: Schema.String,
   grants: Schema.Array(
@@ -155,6 +160,8 @@ export const NativeStatus = Schema.Struct({
   ),
   pending: Schema.Array(NativeProposal),
   recent: Schema.Array(NativeProposal),
+  /** The newest inbox-watch check; absent from older servers and from workflow results. */
+  mailWatch: Schema.optional(Schema.NullOr(NativeMailWatchCheck)),
 });
 export const NativeInventoryInput = Schema.Struct({
   app: NativeApp,
