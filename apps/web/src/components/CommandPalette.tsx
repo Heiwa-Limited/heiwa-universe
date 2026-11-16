@@ -91,6 +91,7 @@ import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstra
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { copyThreadReference } from "../lib/copyThreadReference";
+import { restoreTerminalRevealFromPalette } from "../lib/revealThreadTerminal";
 import {
   queueWorkspaceFocusFromPalette,
   restoreWorkspaceFocusFromPalette,
@@ -215,6 +216,10 @@ import {
   sourceControlHostIcon,
 } from "./CommandPaletteAddProject";
 import { useCommandPaletteThreadItems } from "./CommandPaletteThreadItems";
+import {
+  RUNNING_TERMINALS_GROUP,
+  useCommandPaletteRunningTerminalsItem,
+} from "./CommandPaletteTerminalItems";
 import { useCommandPaletteThemeItems } from "./CommandPaletteThemeItems";
 import {
   CommandPaletteVirtualizedResults,
@@ -336,6 +341,7 @@ function CommandPaletteDialog(props: {
       data-testid="command-palette"
       finalFocus={() => {
         if (restoreWorkspaceFocusFromPalette()) return false;
+        if (restoreTerminalRevealFromPalette()) return false;
         const returnFocus = getCommandPaletteReturnFocus();
         if (returnFocus === false) return false;
         const composer = composerHandleRef?.current;
@@ -624,6 +630,9 @@ function OpenCommandPaletteDialog(props: {
   const currentProjectEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
+  const runningTerminalsItem = useCommandPaletteRunningTerminalsItem(
+    currentProjectEnvironmentId ?? primaryEnvironmentId,
+  );
   const scratchTargetEnvironmentId = scratchEnvironmentId(currentProjectEnvironmentId);
   const supportsTriage = (environmentId: EnvironmentId | null) =>
     environments.find((environment) => environment.environmentId === environmentId)?.serverConfig
@@ -1407,6 +1416,10 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
+  if (runningTerminalsItem !== null) {
+    actionItems.push(runningTerminalsItem);
+  }
+
   if (newProjectEnvironmentOptions.length > 0) {
     actionItems.push({
       kind: "action",
@@ -1625,7 +1638,9 @@ function OpenCommandPaletteDialog(props: {
             ? changeThemeItem.groups
             : currentView?.groups[0]?.value === "appearance"
               ? changeAppearanceItem.groups
-              : (currentView?.groups ?? rootGroups);
+              : currentView?.groups[0]?.value === RUNNING_TERMINALS_GROUP
+                ? (runningTerminalsItem?.groups ?? [])
+                : (currentView?.groups ?? rootGroups);
 
   const isLinkedThreadSearch =
     linkedThreadSearch?.linkedThreads !== undefined && deferredQuery === linkedThreadSearch.query;
