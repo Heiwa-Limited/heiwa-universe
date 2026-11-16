@@ -37,3 +37,7 @@ export const nativeResolve = createEnvironmentRpcCommand(connectionAtomRuntime, 
   label: "heiwa:native:resolve",
   tag: WS_METHODS.nativeResolve,
 });
+export const ensureScratchProject = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "heiwa:native:scratch-project",
+  tag: WS_METHODS.projectsEnsureScratch,
+});

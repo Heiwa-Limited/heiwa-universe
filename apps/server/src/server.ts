@@ -15,7 +15,11 @@ import * as NodeHttp from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentHttpApi, type RepositoryIdentity } from "@t3tools/contracts";
+import {
+  EnvironmentHttpApi,
+  MAIL_INTAKE_TASK_ID,
+  type RepositoryIdentity,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -146,6 +150,7 @@ import {
   relayHookBaseUrl,
   ScheduledTaskWebhookOrigin,
 } from "./scheduledTasks/ScheduledTaskService.ts";
+import { ScheduledTaskRunGate } from "./scheduledTasks/ScheduledTaskRunGate.ts";
 import {
   CLOUD_ENDPOINT_RUNTIME_CONFIG,
   decodeRuntimeConfig,
@@ -521,8 +526,20 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
   }),
 );
 
+const layerNativeWorkflows = NativeWorkflows.layer.pipe(Layer.provide(NativeHost.layer));
+
+// The inbox watch polls on a timer; it starts an agent only when unread mail arrived.
+const layerMailIntakeGate = Layer.effect(
+  ScheduledTaskRunGate,
+  Effect.gen(function* () {
+    const native = yield* NativeWorkflows.NativeWorkflows;
+    return (task) => (task.id === MAIL_INTAKE_TASK_ID ? native.hasNewMail : Effect.succeed(true));
+  }),
+).pipe(Layer.provide(layerNativeWorkflows));
+
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
   Layer.provide(layerScheduledTaskWebhookOrigin),
+  Layer.provide(layerMailIntakeGate),
   Layer.provide(ProviderEventIngestor.layerAnalytics),
   Layer.provide(layerCheckpointStore),
   Layer.provide(layerGitWorkflow),
@@ -700,7 +717,7 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
 
 const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(LocalProvision.layer),
-  Layer.provideMerge(NativeWorkflows.layer.pipe(Layer.provide(NativeHost.layer))),
+  Layer.provideMerge(layerNativeWorkflows),
   Layer.provideMerge(layerUsage),
   Layer.provideMerge(layerBackground),
   Layer.provideMerge(layerResourceDiagnostics),

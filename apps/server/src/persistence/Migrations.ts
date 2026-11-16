@@ -84,6 +84,7 @@ import Migration0076 from "./Migrations/076_HeiwaNativeWorkflows.ts";
 import Migration0077 from "./Migrations/077_NativeWorkflowAuthority.ts";
 import Migration0078 from "./Migrations/078_NativeProposalSource.ts";
 import Migration0079 from "./Migrations/079_NativeIntakeCursor.ts";
+import Migration0080 from "./Migrations/080_NativeWatchCheck.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -166,6 +167,7 @@ const migrationEntries = [
   [77, "NativeWorkflowAuthority", Migration0077],
   [78, "NativeProposalSource", Migration0078],
   [79, "NativeIntakeCursor", Migration0079],
+  [80, "NativeWatchCheck", Migration0080],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

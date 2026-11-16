@@ -14,6 +14,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import { ScheduledTaskRunGate } from "./ScheduledTaskRunGate.ts";
 import * as ScheduledTaskService from "./ScheduledTaskService.ts";
 
 const decodeUpsertInput = Schema.decodeUnknownEffect(ScheduledTaskUpsertInput);
@@ -228,4 +229,56 @@ it.effect(
         expect(yield* Deferred.await(launched)).toBe(created.task.title);
       }).pipe(Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(layerDependencies))));
     }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("a gated timer run starts no thread and waits for the next interval", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(Date.parse("2026-07-01T09:00:00.000Z"));
+    const launched = yield* Deferred.make<string>();
+    const asked: Array<{ readonly nextRunAt: string | null; readonly runCount: number }> = [];
+    const layerDependencies = Layer.mergeAll(
+      NodeCrypto.layer,
+      Scheduler.layer,
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+        launch: (input) =>
+          Deferred.succeed(launched, input.title).pipe(
+            Effect.as({ threadId: "thread-gated", resumed: false } as never),
+          ),
+      }),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        namedProjectsRoot: "/projects",
+        isScratchProject: () => Effect.succeed(false),
+      }),
+      Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+      Layer.mock(SecretRequests.SecretRequests)({}),
+      // Closed for the first fire, open from the second.
+      Layer.succeed(ScheduledTaskRunGate, (task) =>
+        Effect.sync(() => asked.push({ nextRunAt: task.nextRunAt, runCount: task.runCount }) > 1),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const created = yield* service.upsert(
+        yield* decodeUpsertInput({
+          title: "Gated",
+          prompt: "Run mail intake.",
+          enabled: true,
+          schedule: { type: "interval", everyMs: 60_000 },
+          projectId: "project-gated",
+          workspaceStrategy: { type: "root" },
+          modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+        }),
+      );
+      yield* TestClock.adjust("65 seconds");
+      yield* TestClock.adjust("65 seconds");
+      expect(yield* Deferred.await(launched)).toBe(created.task.title);
+      expect(asked).toHaveLength(2);
+      // The skipped fire moved the schedule on but did not count as a run.
+      expect(asked[0]?.nextRunAt).toBe(created.task.nextRunAt);
+      expect(asked[1]?.nextRunAt! > asked[0]?.nextRunAt!).toBe(true);
+      expect(asked[1]?.runCount).toBe(0);
+    }).pipe(Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(layerDependencies))));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

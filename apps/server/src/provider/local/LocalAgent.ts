@@ -49,6 +49,11 @@ class LocalAgentError extends Error {
   }
 }
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const LOCAL_CONTEXT_BYTES = 24_000;
+// Room left after a tool result for the model's next tool call or answer.
+const TOOL_RESULT_RESERVE = 2_000;
+const contextBytes = (messages: ReadonlyArray<unknown>, tools: ReadonlyArray<unknown>) =>
+  Buffer.byteLength(encodeJson({ messages, tools }), "utf8");
 const decodeResponse = Schema.decodeUnknownSync(Schema.fromJsonString(ResponseBody));
 const decodeJson = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeModelShow = Schema.decodeUnknownSync(
@@ -180,7 +185,7 @@ export async function runLocalTurn(input: {
   let calls = 0;
   for (let round = 0; round < (input.maxRounds ?? 8); round++) {
     input.signal?.throwIfAborted();
-    if (Buffer.byteLength(encodeJson({ messages, tools: input.tools }), "utf8") > 24_000)
+    if (contextBytes(messages, input.tools) > LOCAL_CONTEXT_BYTES)
       throw new LocalAgentError(
         "budget",
         "This local chat reached its context limit. Start a new chat or request a smaller result. Earlier tool actions remain recorded; do not repeat them blindly.",
@@ -246,17 +251,22 @@ export async function runLocalTurn(input: {
         await input.onTool?.("complete", name, args, output);
       }
       const content = encodeJson(output);
+      // A result that cannot fit comes back as an error the model can act on, not a failed turn.
+      const fits =
+        contextBytes(messages, input.tools) +
+          Buffer.byteLength(content, "utf8") +
+          TOOL_RESULT_RESERVE <=
+        LOCAL_CONTEXT_BYTES;
       messages.push({
         role: "tool",
         tool_name: name,
-        content:
-          content.length > 64_000
-            ? encodeJson({
-                error:
-                  "The tool result exceeded the local context limit. Request a smaller bounded result.",
-                truncated: true,
-              })
-            : content,
+        content: !fits
+          ? encodeJson({
+              error:
+                "The tool result exceeded the local context limit. Request a smaller bounded result.",
+              truncated: true,
+            })
+          : content,
       });
       input.onHistory?.(messages);
     }

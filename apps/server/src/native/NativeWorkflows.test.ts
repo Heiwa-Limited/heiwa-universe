@@ -13,6 +13,7 @@ import authorityMigration from "../persistence/Migrations/077_NativeWorkflowAuth
 import migration from "../persistence/Migrations/076_HeiwaNativeWorkflows.ts";
 import sourceMigration from "../persistence/Migrations/078_NativeProposalSource.ts";
 import intakeMigration from "../persistence/Migrations/079_NativeIntakeCursor.ts";
+import watchMigration from "../persistence/Migrations/080_NativeWatchCheck.ts";
 
 const snapshot: NativeHost.NativeSnapshot = {
   app: "reminders",
@@ -33,6 +34,7 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
   let applied: ReadonlyArray<string> = [];
   const mailStarts: Array<string | undefined> = [];
   let mail: ReadonlyArray<NativeHost.NativeSnapshot> = [];
+  let mailDenied = false;
   let currentResource = resource;
   const host = NativeHost.NativeHost.of({
     platform: "darwin",
@@ -43,10 +45,16 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
           records: ids.includes("list-1") ? [snapshot] : [],
           truncated: false,
         });
+      if (mailDenied)
+        return Effect.fail(
+          new NativeWorkflowError({ code: "permission", detail: "Allow Heiwa to control Mail." }),
+        );
       mailStarts.push(input.start);
-      const records = mail;
-      mail = [];
-      return Effect.succeed({ records, truncated: false });
+      const after = Date.parse(input.start ?? "");
+      return Effect.succeed({
+        records: mail.filter((record) => !(Date.parse(record.start ?? "") < after)),
+        truncated: false,
+      });
     },
     inspect: () => Effect.succeed(snapshot),
     apply: (action, expected) => {
@@ -65,8 +73,21 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
     writes: () => writes,
     appliedFields: () => applied,
     mailStarts: () => mailStarts,
-    deliverMail: (received: string) => {
-      mail = [{ ...snapshot, app: "mail", id: received, title: "Hello", start: received }];
+    deliverMail: (received: string, body = "") => {
+      mail = [
+        ...mail,
+        {
+          ...snapshot,
+          app: "mail",
+          id: `${received}:${mail.length}`,
+          title: "Hello",
+          body,
+          start: received,
+        },
+      ];
+    },
+    denyMail: (denied: boolean) => {
+      mailDenied = denied;
     },
     renameResource: () => {
       currentResource = { ...resource, title: "Renamed list" };
@@ -76,6 +97,7 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
         Effect.andThen(authorityMigration),
         Effect.andThen(sourceMigration),
         Effect.andThen(intakeMigration),
+        Effect.andThen(watchMigration),
       ),
     ).pipe(
       Layer.provideMerge(
@@ -222,6 +244,9 @@ describe("native workflow authority", () => {
       const proposal = yield* service.propose({ ...create, source });
       assert.deepStrictEqual(proposal.source, { ...source, title: "Before" });
       assert.deepStrictEqual((yield* service.status).pending[0]?.source, proposal.source);
+      // Staging the same change again returns the first instead of adding a second entry.
+      assert.equal((yield* service.propose({ ...create, source })).id, proposal.id);
+      assert.equal((yield* service.status).pending.length, 1);
       yield* service.approve(proposal.id, true);
       assert.isFalse(f.appliedFields().includes("source"));
       assert.equal(
@@ -241,19 +266,78 @@ describe("native workflow authority", () => {
         service
           .run({ workflow: "mail-intake" })
           .pipe(Effect.map((result) => result.sources[0]?.records.length));
+      const watched = () => service.status.pipe(Effect.map((status) => status.mailWatch));
+      assert.equal(yield* watched(), null);
+      assert.equal(yield* service.hasNewMail, false);
+      assert.equal((yield* watched())?.outcome, "no-new-mail");
       f.deliverMail("2026-11-14T10:00:00Z");
+      assert.equal(yield* service.hasNewMail, true);
+      assert.equal((yield* watched())?.outcome, "new-mail");
       assert.equal(yield* intake(), 1);
+      assert.equal(yield* service.hasNewMail, false);
+      // Mail that cannot be read keeps the watch closed but says why.
+      f.denyMail(true);
+      assert.equal(yield* service.hasNewMail, false);
+      assert.deepInclude(yield* watched(), {
+        outcome: "unreadable",
+        detail: "Allow Heiwa to control Mail.",
+      });
+      f.denyMail(false);
       assert.equal(yield* intake(), 0);
       f.deliverMail("2026-11-14T11:30:00Z");
       assert.equal(yield* intake(), 1);
       yield* intake();
-      // The first run looks back a day from the test clock's epoch; later runs start after what was handed out.
+      // The first run looks back a day from the test clock's epoch; later runs start after what
+      // was handed out. Asking whether mail is waiting reads from the cursor without moving it.
       assert.deepStrictEqual(f.mailStarts(), [
         "1969-12-31T00:00:00Z",
+        "1969-12-31T00:00:00Z",
+        "1969-12-31T00:00:00Z",
+        "2026-11-14T10:00:01Z",
         "2026-11-14T10:00:01Z",
         "2026-11-14T10:00:01Z",
         "2026-11-14T11:30:01Z",
       ]);
+    }).pipe(Effect.provide(f.layer));
+  });
+  it.effect("hands a large backlog out in batches a local model can hold, losing none", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const service = yield* NativeWorkflows.NativeWorkflows;
+      yield* service.select("mail", ["list-1"]);
+      const long = "x".repeat(3000);
+      // Delivered newest first; the last two share a second.
+      for (const received of [
+        "2026-11-14T10:00:06Z",
+        "2026-11-14T10:00:06Z",
+        "2026-11-14T10:00:04Z",
+        "2026-11-14T10:00:03Z",
+        "2026-11-14T10:00:02Z",
+        "2026-11-14T10:00:01Z",
+      ])
+        f.deliverMail(received, long);
+      const handed: string[] = [];
+      let batches = 0;
+      for (let run = 0; run < 6; run++) {
+        const source = (yield* service.run({ workflow: "mail-intake" })).sources[0]!;
+        if (source.records.length === 0) break;
+        assert.isTrue(source.truncated);
+        assert.isTrue(JSON.stringify(source.records).length <= 7_000);
+        assert.isTrue(source.records.every((record) => record.body.length <= 1_001));
+        handed.push(...source.records.map((record) => record.start!));
+        batches += 1;
+      }
+      assert.isAbove(batches, 1);
+      // Every message once, oldest first, and both messages of the shared second.
+      assert.deepStrictEqual(handed, [
+        "2026-11-14T10:00:01Z",
+        "2026-11-14T10:00:02Z",
+        "2026-11-14T10:00:03Z",
+        "2026-11-14T10:00:04Z",
+        "2026-11-14T10:00:06Z",
+        "2026-11-14T10:00:06Z",
+      ]);
+      assert.equal(yield* service.hasNewMail, false);
     }).pipe(Effect.provide(f.layer));
   });
   it.effect("requires exact current revision before staging an edit", () => {
