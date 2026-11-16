@@ -162,7 +162,8 @@ export const make = Effect.gen(function* () {
       reason: supported
         ? null
         : "In-app source updates require a managed macOS installation. Install this build once with desktop:channel to register its updater.",
-      trackedChannel: tracked.defaultChannel ?? "dev",
+      // An unset default follows the installed app, matching desktop-channel.
+      trackedChannel: tracked.defaultChannel ?? installed?.channel ?? "dev",
       installed,
       rollbackAvailable: yield* fs.exists(path.join(cache, "rollback", "Heiwa.app")),
       operation,

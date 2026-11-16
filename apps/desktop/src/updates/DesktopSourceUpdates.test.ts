@@ -107,6 +107,23 @@ it.layer(NodeServices.layer)("managed source updates", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("follows the installed channel until a default is chosen", () =>
+    Effect.gen(function* () {
+      const t = yield* setup;
+      yield* t.write(
+        t.path.join(t.environment.resourcesPath, "heiwa-channel.json"),
+        DesktopSourceState.fields.installed,
+        { channel: "main", commit: "abc", version: "0.4.0-preview.20261115.1" },
+      );
+      expect((yield* t.service.state).trackedChannel).toBe("main");
+      yield* t.fs.writeFileString(
+        t.path.join(t.cache, "state.json"),
+        JSON.stringify({ defaultChannel: "dev" }),
+      );
+      expect((yield* t.service.state).trackedChannel).toBe("dev");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect(
     "refuses a different installation or data directory and fails closed on corrupt receipts",
     () =>

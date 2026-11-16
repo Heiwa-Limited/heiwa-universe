@@ -325,6 +325,20 @@ const readBundle = Effect.fn("desktopChannel.readBundle")(function* (appPath: st
   });
 });
 
+/** An unset default follows the installed app, so checking never silently switches channel. */
+const trackedChannel = (
+  state: { readonly defaultChannel?: Channel | undefined },
+  installed: Option.Option<BundleInfo>,
+) =>
+  state.defaultChannel ??
+  Option.getOrElse(
+    Option.map(
+      Option.flatMap(installed, (bundle) => bundle.marker),
+      (marker) => marker.channel,
+    ),
+    () => DEFAULT_CHANNEL,
+  );
+
 const describeBundle = (bundle: BundleInfo) =>
   Option.match(bundle.marker, {
     onNone: () => `${bundle.version} (not installed by desktop-channel; channel unknown)`,
@@ -1057,7 +1071,7 @@ const status = Effect.fn("desktopChannel.status")(function* (paths: Paths, offli
     }
   }
   lines.push(
-    `Default    ${state.defaultChannel ?? DEFAULT_CHANNEL}${state.defaultChannel ? "" : " (unset; built-in default)"}`,
+    `Default    ${trackedChannel(state, installed)}${state.defaultChannel ? "" : " (unset; follows the installed app)"}`,
   );
   const rollback = yield* readBundle(paths.rollbackApp);
   lines.push(
@@ -1259,7 +1273,7 @@ const installCommand = Command.make(
     Effect.gen(function* () {
       const paths = yield* resolvePaths(flags);
       const state = yield* readState(paths);
-      const tracked = state.defaultChannel ?? DEFAULT_CHANNEL;
+      const tracked = trackedChannel(state, yield* readBundle(paths.app));
       const channel = Option.getOrElse(flags.channel, () => tracked);
       if (channel !== tracked) {
         yield* Console.log(`One-off install of ${channel}; this machine still tracks ${tracked}.`);
