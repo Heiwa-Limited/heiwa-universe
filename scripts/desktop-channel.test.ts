@@ -8,6 +8,7 @@ import * as DateTime from "effect/DateTime";
 
 import { isDesktopPreviewVersion, resolveDesktopUpdateChannel } from "./build-desktop-artifact.ts";
 import {
+  channelCheckMessage,
   isHeiwaSource,
   channelBuildVersion,
   classifyDatabase,
@@ -120,6 +121,17 @@ it.each([
   ["https://github.com/Heiwa-Limited/heiwa-universe.git?redirect=evil", false],
 ])("validates the update authority: %s", (remote, allowed) => {
   assert.equal(isHeiwaSource(remote), allowed);
+});
+
+it.each([
+  ["same", "Up to date with dev (0123456789ab)."],
+  [
+    "ahead",
+    "This app is a local build ahead of dev (0123456789ab). Updating would replace it with the older dev.",
+  ],
+  ["other", "Latest dev: 0123456789ab. Ready to install."],
+] as const)("a check against an installed build that is %s says so", (relation, message) => {
+  assert.equal(channelCheckMessage("dev", "0123456789abcdef", relation), message);
 });
 
 it.live("a second installer cannot overwrite the active operation receipt", () =>

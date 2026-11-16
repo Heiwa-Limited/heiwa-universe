@@ -559,6 +559,19 @@ interface Target {
   readonly migrations: ReadonlyArray<Migration>;
 }
 
+/** A local build that already contains the channel tip must not be offered as an update. */
+export function channelCheckMessage(
+  channel: Channel,
+  target: string,
+  installed: "same" | "ahead" | "other",
+): string {
+  const short = target.slice(0, 12);
+  if (installed === "same") return `Up to date with ${channel} (${short}).`;
+  if (installed === "ahead")
+    return `This app is a local build ahead of ${channel} (${short}). Updating would replace it with the older ${channel}.`;
+  return `Latest ${channel}: ${short}. Ready to install.`;
+}
+
 export function isHeiwaSource(remote: string): boolean {
   return /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)Heiwa-Limited\/heiwa-universe(?:\.git)?$/.test(
     remote,
@@ -1202,10 +1215,27 @@ const appActionCommand = Command.make(
           if (flags.action === "check") {
             const target = yield* resolveTarget(paths, flags.channel);
             yield* checkDatabase(paths, target.migrations, flags.channel, false);
+            const installedCommit = Option.getOrUndefined(
+              Option.map(
+                Option.flatMap(yield* readBundle(paths.app), (bundle) => bundle.marker),
+                (marker) => marker.commit,
+              ),
+            );
+            const relation =
+              installedCommit === target.commit
+                ? "same"
+                : installedCommit !== undefined &&
+                    (yield* succeeds(
+                      "git",
+                      ["merge-base", "--is-ancestor", target.commit, installedCommit],
+                      paths.repoRoot,
+                    ))
+                  ? "ahead"
+                  : "other";
             operation = {
               ...operation,
               targetCommit: target.commit,
-              message: `Latest ${flags.channel}: ${target.commit.slice(0, 12)}. Ready to install.`,
+              message: channelCheckMessage(flags.channel, target.commit, relation),
             };
           } else if (flags.action === "update") {
             yield* installChannel(paths, flags.channel, {
