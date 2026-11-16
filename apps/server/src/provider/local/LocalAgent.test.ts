@@ -1,5 +1,6 @@
 import { assert, expect, it } from "@effect/vitest";
-import { localOllamaEndpoint, runLocalTurn } from "./LocalAgent.ts";
+import * as DateTime from "effect/DateTime";
+import { localAgentInstructions, localOllamaEndpoint, runLocalTurn } from "./LocalAgent.ts";
 const tool = {
   name: "fixture_read",
   description: "Read the fixture",
@@ -175,4 +176,12 @@ it("refuses context overflow before making a chat request and retains completed 
     }),
   ).rejects.toThrow();
   assert.deepStrictEqual(JSON.parse((saved[1] as { content: string }).content), { saved: true });
+});
+it("tells the model today's date and the dates of the coming week across a month end", () => {
+  const text = localAgentInstructions(
+    DateTime.makeZonedUnsafe("2026-11-29T04:30:00Z", { timeZone: "America/Toronto" }),
+  );
+  expect(text).toContain("Today is Saturday 2026-11-28, time zone -05:00.");
+  expect(text).toContain("Monday 2026-11-30, Tuesday 2026-12-01");
+  expect(text).toContain("Saturday 2026-12-05.");
 });

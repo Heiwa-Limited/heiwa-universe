@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- ACP is an isolated stdio worker; the parent runtime owns permissions and durable work.
 import * as NodeCrypto from "node:crypto";
+import * as DateTime from "effect/DateTime";
 import * as Exit from "effect/Exit";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -7,7 +8,7 @@ import * as Scope from "effect/Scope";
 import * as Acp from "effect-acp/schema-v1";
 import { mcpToolSession, type McpToolSession } from "../../mcp/AcpMcpStdioBridge.ts";
 import {
-  LOCAL_AGENT_INSTRUCTIONS,
+  localAgentInstructions,
   listLocalModels,
   runLocalTurn,
   type LocalMessage,
@@ -42,6 +43,8 @@ const decodeSetModel = Schema.decodeUnknownSync(
   Schema.Struct({ sessionId: Schema.String, modelId: Schema.String }),
 );
 const decodePrompt = Schema.decodeUnknownSync(Acp.PromptRequest);
+const instructionsNow = () =>
+  localAgentInstructions(DateTime.setZone(DateTime.nowUnsafe(), DateTime.zoneMakeLocal()));
 const ALLOWED_MCP = new Set([
   "heiwa_workflow",
   "heiwa_native_read",
@@ -181,7 +184,7 @@ export async function runOllamaAcp() {
           cwd: input.cwd,
           model,
           models,
-          history: [{ role: "system", content: LOCAL_AGENT_INSTRUCTIONS }],
+          history: [{ role: "system", content: instructionsNow() }],
           tools: [...LOCAL_WORKSPACE_TOOLS, ...mcpTools],
           execute: async () => undefined,
         };
@@ -276,6 +279,7 @@ export async function runOllamaAcp() {
         });
         const controller = new AbortController();
         session.active = controller;
+        session.history[0] = { role: "system", content: instructionsNow() };
         session.history.push({ role: "user", content: pieces.join("\n\n") });
         let currentTool = "";
         try {

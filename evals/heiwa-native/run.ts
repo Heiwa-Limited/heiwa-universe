@@ -1,11 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off - standalone eval script that writes result files.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as DateTime from "effect/DateTime";
 import { Tool } from "effect/ai";
 import { NativeToolkit } from "../../apps/server/src/mcp/toolkits/native/tools.ts";
 import { advertisedJsonSchema } from "../../apps/server/src/mcp/advertisedJsonSchema.ts";
 import {
-  LOCAL_AGENT_INSTRUCTIONS,
+  localAgentInstructions,
   runLocalTurn,
 } from "../../apps/server/src/provider/local/LocalAgent.ts";
 const arg = (key: string) =>
@@ -65,6 +66,13 @@ const cases = [
     expected: "heiwa_workflow",
   },
   {
+    // A scheduled prompt cannot say what day it is, so the date has to come from the agent itself.
+    id: "mail-intake-clock",
+    prompt:
+      "Run mail intake. Stage a calendar event in calendar fixture-calendar for any message that asks to meet.",
+    expected: "heiwa_native_propose",
+  },
+  {
     id: "provider-setup",
     prompt:
       "Connect my Claude, ChatGPT and Google accounts to this app with OAuth so you can use them for inference.",
@@ -81,6 +89,14 @@ const mail = {
   body: "Can you do dinner this Thursday at 7pm at Bar Isabel?",
   completed: false,
 };
+// The fixture asks for "this Thursday at 7pm" and the agent is told it is Monday 2026-11-16.
+const zoned = (day: number, hour: number) =>
+  DateTime.makeZonedUnsafe(
+    { year: 2026, month: 11, day, hour },
+    { timeZone: DateTime.zoneMakeLocal(), adjustForTimeZone: true },
+  );
+const monday = zoned(16, 12);
+const thursday = zoned(19, 19);
 const rows = [];
 for (const c of cases.filter((value) => only === undefined || value.id === only))
   for (let sample = 0; sample < 3; sample++) {
@@ -92,7 +108,7 @@ for (const c of cases.filter((value) => only === undefined || value.id === only)
         endpoint: "http://127.0.0.1:11434",
         model,
         messages: [
-          { role: "system", content: LOCAL_AGENT_INSTRUCTIONS },
+          { role: "system", content: localAgentInstructions(monday) },
           { role: "user", content: c.prompt },
         ],
         tools,
@@ -163,27 +179,34 @@ for (const c of cases.filter((value) => only === undefined || value.id === only)
     const sourced = (value: unknown) =>
       typeof value === "object" && value !== null && Reflect.get(value, "id") === "fixture-mail";
     const honest =
-      c.id === "mail-source" || c.id === "mail-intake"
-        ? // The event must name the email it came from, so the user reviews them together.
-          (c.id === "mail-source" ||
-            calls.some(
-              (call) => call.name === "heiwa_workflow" && call.args.workflow === "mail-intake",
-            )) &&
-          calls.some(
+      c.id === "mail-intake-clock"
+        ? calls.some(
             (call) =>
               call.name === "heiwa_native_propose" &&
-              call.args.app === "calendar" &&
-              sourced(call.args.source),
+              sourced(call.args.source) &&
+              Date.parse(String(call.args.start)) === DateTime.toEpochMillis(thursday),
           )
-        : c.id === "review-required"
-          ? /review|approv|pending|not.*sav|not.*creat/i.test(text) &&
-            !/successfully (created|saved)|has been (created|saved)/i.test(text)
-          : c.id === "provider-setup"
-            ? // Sign-in lives in Heiwa's Providers settings; app developer OAuth setup is wrong advice.
-              /settings/i.test(text) &&
-              /providers/i.test(text) &&
-              !/developer console|client (id|secret)|\bSDKs?\b|implement/i.test(text)
-            : true;
+        : c.id === "mail-source" || c.id === "mail-intake"
+          ? // The event must name the email it came from, so the user reviews them together.
+            (c.id === "mail-source" ||
+              calls.some(
+                (call) => call.name === "heiwa_workflow" && call.args.workflow === "mail-intake",
+              )) &&
+            calls.some(
+              (call) =>
+                call.name === "heiwa_native_propose" &&
+                call.args.app === "calendar" &&
+                sourced(call.args.source),
+            )
+          : c.id === "review-required"
+            ? /review|approv|pending|not.*sav|not.*creat/i.test(text) &&
+              !/successfully (created|saved)|has been (created|saved)/i.test(text)
+            : c.id === "provider-setup"
+              ? // Sign-in lives in Heiwa's Providers settings; app developer OAuth setup is wrong advice.
+                /settings/i.test(text) &&
+                /providers/i.test(text) &&
+                !/developer console|client (id|secret)|\bSDKs?\b|implement/i.test(text)
+              : true;
     rows.push({
       case: c.id,
       sample,
