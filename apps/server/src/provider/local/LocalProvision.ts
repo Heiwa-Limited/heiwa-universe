@@ -1,8 +1,8 @@
 import {
+  LOCAL_PROVIDER_INSTANCE_ID,
   LocalInferenceError,
   LocalInferenceInput,
   ProviderDriverKind,
-  ProviderInstanceId,
 } from "@t3tools/contracts";
 import { resolveSelfInvocation, selfInvocationArgs } from "@t3tools/shared/nodeRuntime";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -57,7 +57,7 @@ const make = Effect.gen(function* () {
           });
         return yield* gate.withPermits(1)(
           Effect.gen(function* () {
-            const instanceId = ProviderInstanceId.make("heiwa_ollama");
+            const instanceId = LOCAL_PROVIDER_INSTANCE_ID;
             const current = yield* settings.getSettings;
             const existing = current.providerInstances[instanceId];
             if (

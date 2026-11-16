@@ -1,5 +1,11 @@
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
+import { ScheduledTaskId } from "./baseSchemas.ts";
+
+/** One fixed id, so a client can find, pause and resume the inbox watch without a lookup. */
+export const MAIL_INTAKE_TASK_ID = ScheduledTaskId.make("heiwa:mail-intake");
+export const MAIL_INTAKE_PROMPT =
+  "Run mail intake once. If it returns no messages, reply 'No new mail' and stop without calling another tool. Otherwise, for each returned message that asks to meet, stage one calendar event in one of my selected calendars, then stop. Stage each event only once.";
 
 /** Civil-date round trip rejects Date.parse's silent normalization of impossible days. */
 export function isNativeInstant(value: string): boolean {
@@ -137,6 +143,11 @@ export const NativeProposal = Schema.Struct({
 });
 export type NativeProposal = typeof NativeProposal.Type;
 export const NativeWriteMode = Schema.Literals(["review", "automatic"]);
+export const NativeMailWatchCheck = Schema.Struct({
+  checkedAt: Schema.String,
+  outcome: Schema.Literals(["new-mail", "no-new-mail", "unreadable"]),
+  detail: Schema.NullOr(Schema.String),
+});
 export const NativeStatus = Schema.Struct({
   platform: Schema.String,
   grants: Schema.Array(
@@ -149,6 +160,8 @@ export const NativeStatus = Schema.Struct({
   ),
   pending: Schema.Array(NativeProposal),
   recent: Schema.Array(NativeProposal),
+  /** The newest inbox-watch check; absent from older servers and from workflow results. */
+  mailWatch: Schema.optional(Schema.NullOr(NativeMailWatchCheck)),
 });
 export const NativeInventoryInput = Schema.Struct({
   app: NativeApp,

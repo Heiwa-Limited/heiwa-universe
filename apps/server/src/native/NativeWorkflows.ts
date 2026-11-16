@@ -6,7 +6,9 @@ import {
   NativeApp,
   NativeProposal,
   NativeResource,
+  type NativeRecord,
   NativeSource,
+  type NativeStatus,
   NativeWriteMode,
   NativeWorkflowError,
   type NativeReadInput,
@@ -25,6 +27,9 @@ import * as MailIndex from "./MailIndex.ts";
 import * as NativeHost from "./NativeHost.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const INTAKE_BYTES = 6_000;
+const utf8 = new TextEncoder();
+const INTAKE_BODY_CHARS = 1_000;
 const decodeResource = Schema.decodeUnknownEffect(Schema.fromJsonString(NativeResource));
 const decodeResources = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(NativeResource)),
@@ -276,11 +281,14 @@ const make = Effect.gen(function* () {
   const instant = (value: DateTime.Utc) => `${DateTime.formatIso(value).slice(0, 19)}Z`;
   // The cursor moves when mail is handed out, not when a run finishes: a failed run misses a
   // suggestion, which costs less than proposing the same email twice.
-  const mailIntake = Effect.fn("NativeWorkflows.mailIntake")(function* (limit: number) {
+  const intakeAfter = Effect.gen(function* () {
     const rows = yield* sql<{
       after: string;
     }>`SELECT after FROM heiwa_native_intake WHERE app = 'mail'`;
-    const after = rows[0]?.after ?? instant(DateTime.subtract(yield* DateTime.now, { days: 1 }));
+    return rows[0]?.after ?? instant(DateTime.subtract(yield* DateTime.now, { days: 1 }));
+  });
+  const mailIntake = Effect.fn("NativeWorkflows.mailIntake")(function* (limit: number) {
+    const after = yield* intakeAfter;
     const result = yield* read({ app: "mail", start: after, limit }).pipe(Effect.result);
     if (result._tag === "Failure")
       return {
@@ -291,16 +299,45 @@ const make = Effect.gen(function* () {
           ? result.failure.detail
           : "This source could not be read.",
       };
+    // Oldest first within a byte budget, so a local model's context holds the batch and the
+    // cursor stops at the last message handed out; the rest arrive on the next run.
+    const trim = (record: NativeRecord): NativeRecord =>
+      record.body.length > INTAKE_BODY_CHARS
+        ? { ...record, body: `${record.body.slice(0, INTAKE_BODY_CHARS)}…` }
+        : record;
+    const oldestFirst = result.success.records
+      .map(trim)
+      .sort((a, b) => Date.parse(a.start ?? "") - Date.parse(b.start ?? ""));
+    let records: Array<NativeRecord> = [];
+    let bytes = 0;
+    for (const record of oldestFirst) {
+      const size = utf8.encode(encodeJson(record)).length;
+      if (records.length > 0 && bytes + size > INTAKE_BYTES) break;
+      records.push(record);
+      bytes += size;
+    }
+    // The cursor is one second past the newest message, so a cut never splits one second: drop
+    // the cut second, or when it is all there is, hand all of it out.
+    const cut = oldestFirst[records.length]?.start;
+    if (cut !== undefined && records.at(-1)?.start === cut) {
+      const before = records.filter((record) => record.start !== cut);
+      records = before.length > 0 ? before : oldestFirst.filter((record) => record.start === cut);
+    }
+    const trimmedAny = result.success.records.some((record) => trim(record) !== record);
     const newest = Math.max(
-      ...result.success.records
-        .map((record) => Date.parse(record.start ?? ""))
-        .filter(Number.isFinite),
+      ...records.map((record) => Date.parse(record.start ?? "")).filter(Number.isFinite),
     );
     if (Number.isFinite(newest)) {
       const next = instant(DateTime.makeUnsafe(newest + 1000));
       yield* sql`INSERT INTO heiwa_native_intake (app, after) VALUES ('mail', ${next}) ON CONFLICT(app) DO UPDATE SET after = excluded.after`;
     }
-    return { app: "mail" as const, ...result.success, error: null };
+    return {
+      app: "mail" as const,
+      records,
+      truncated:
+        result.success.truncated || trimmedAny || records.length < result.success.records.length,
+      error: null,
+    };
   });
   const requireSelection = Effect.fn("NativeWorkflows.requireSelection")(function* (
     action: typeof NativeAction.Type,
@@ -369,6 +406,10 @@ const make = Effect.gen(function* () {
       return yield* failure("selection", "This resource is missing or read only.");
     const expected = yield* findExpected(action);
     const source = sourceRef === undefined ? null : yield* findSource(sourceRef);
+    // A model sometimes stages one change twice in a turn; the repeat returns the first.
+    const same =
+      yield* sql<ProposalRow>`SELECT * FROM heiwa_native_proposals WHERE status = 'pending' AND action_json = ${encodeJson(action)} LIMIT 1`;
+    if (same[0] !== undefined) return yield* decodeRow(same[0]);
     const id = NodeCrypto.randomUUID(),
       createdAt = DateTime.formatIso(yield* DateTime.now);
     yield* sql`INSERT INTO heiwa_native_proposals (id, action_json, expected_json, resource_json, source_json, origin, status, created_at) VALUES (${id}, ${encodeJson(action)}, ${expected === null ? null : encodeJson(expected)}, ${encodeJson(resource)}, ${source === null ? null : encodeJson(source)}, ${origin}, 'pending', ${createdAt})`;
@@ -471,7 +512,43 @@ const make = Effect.gen(function* () {
     yield* sql`UPDATE heiwa_native_proposals SET status = 'applied', result_json = ${encodeJson(result)} WHERE id = ${id}`;
     return { ...(yield* decodeRow(row)), status: "applied" as const, result };
   });
-  const currentStatus = status().pipe(Effect.mapError(storageError));
+  const watchCheck = Effect.fn("NativeWorkflows.watchCheck")(function* () {
+    const rows = yield* sql<{
+      checked_at: string;
+      outcome: NonNullable<(typeof NativeStatus.Type)["mailWatch"]>["outcome"];
+      detail: string | null;
+    }>`SELECT checked_at, outcome, detail FROM heiwa_native_watch WHERE app = 'mail'`;
+    const row = rows[0];
+    return row === undefined
+      ? null
+      : { checkedAt: row.checked_at, outcome: row.outcome, detail: row.detail };
+  });
+  // Workflow results embed status for the model; the watch check stays an owner-facing detail.
+  const currentStatus = Effect.gen(function* () {
+    return { ...(yield* status()), mailWatch: yield* watchCheck() };
+  }).pipe(Effect.mapError(storageError));
+  // Records every check so a watch that cannot read Mail says so instead of looking quiet.
+  const checkMail = Effect.gen(function* () {
+    const result = yield* intakeAfter.pipe(
+      Effect.flatMap((start) => read({ app: "mail", start, limit: 1 })),
+      Effect.result,
+    );
+    const outcome =
+      result._tag === "Failure"
+        ? ("unreadable" as const)
+        : result.success.records.length > 0
+          ? ("new-mail" as const)
+          : ("no-new-mail" as const);
+    const detail =
+      result._tag === "Success"
+        ? null
+        : isNativeWorkflowError(result.failure)
+          ? result.failure.detail
+          : "Mail could not be read.";
+    const checkedAt = DateTime.formatIso(yield* DateTime.now);
+    yield* sql`INSERT INTO heiwa_native_watch (app, checked_at, outcome, detail) VALUES ('mail', ${checkedAt}, ${outcome}, ${detail}) ON CONFLICT(app) DO UPDATE SET checked_at = excluded.checked_at, outcome = excluded.outcome, detail = excluded.detail`;
+    return outcome === "new-mail";
+  });
   return {
     status: currentStatus,
     subscribeStatus: Stream.unwrap(
@@ -546,6 +623,11 @@ const make = Effect.gen(function* () {
         return { ...(yield* decodeRow(row)), status: "acknowledged" as const, detail };
       },
       (effect) => announcing(guarded(gate.withPermits(1)(effect))),
+    ),
+    /** Whether intake would hand anything out. Leaves the cursor alone; unreadable Mail is "no". */
+    hasNewMail: announcing(gate.withPermits(1)(checkMail)).pipe(
+      Effect.orElseSucceed(() => false),
+      Effect.withSpan("NativeWorkflows.hasNewMail"),
     ),
     run: Effect.fn("NativeWorkflows.run")(
       function* (input: typeof NativeWorkflowInput.Type) {

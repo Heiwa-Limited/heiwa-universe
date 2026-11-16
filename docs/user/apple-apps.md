@@ -34,6 +34,20 @@ Scheduled tasks, webhooks, agents started by other agents and turns that resumed
 still only prepare changes for you to approve. Removing an item and replacing a note's text always
 need approval.
 
+## Watch your inbox
+
+With a mailbox and a calendar selected, tick **Watch my inbox** under Mail in **Settings > Apple
+apps**. Every 15 minutes Heiwa checks the selected mailboxes for new unread mail. When some
+arrives, a local model reads it and prepares a calendar event for each message that asks to meet.
+The events wait in **Approvals**, grouped under the email they came from. Nothing is added to your
+calendar until you approve it.
+
+A quiet inbox starts no chat and uses no model. Each message is looked at once, and the first check
+goes back one day. Untick the box to pause. The watch is an ordinary scheduled task named **Mail
+intake**: change how often it runs, its instructions or its model in **Settings > Scheduled tasks**.
+
+It needs a local model connected under **Settings > Providers**.
+
 ## Limits
 
 - Heiwa saves mail as drafts. It never sends mail.
