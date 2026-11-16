@@ -6,7 +6,11 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Acp from "effect-acp/schema-v1";
-import { mcpToolSession, type McpToolSession } from "../../mcp/AcpMcpStdioBridge.ts";
+import {
+  mcpToolSession,
+  type McpToolSession,
+  withoutRepeatedStructuredText,
+} from "../../mcp/AcpMcpStdioBridge.ts";
 import {
   localAgentInstructions,
   listLocalModels,
@@ -221,7 +225,9 @@ export async function runOllamaAcp() {
         });
         session.execute = async (name, args, signal) => {
           if (ALLOWED_MCP.has(name) && mcp)
-            return Effect.runPromise(mcp.call(name, args), signal ? { signal } : undefined);
+            return withoutRepeatedStructuredText(
+              await Effect.runPromise(mcp.call(name, args), signal ? { signal } : undefined),
+            );
           return workspace(name, args, signal);
         };
         sessions.set(sessionId, session);

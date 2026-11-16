@@ -28,6 +28,7 @@ import * as NativeHost from "./NativeHost.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const INTAKE_BYTES = 6_000;
+const utf8 = new TextEncoder();
 const INTAKE_BODY_CHARS = 1_000;
 const decodeResource = Schema.decodeUnknownEffect(Schema.fromJsonString(NativeResource));
 const decodeResources = Schema.decodeUnknownEffect(
@@ -310,7 +311,7 @@ const make = Effect.gen(function* () {
     let records: Array<NativeRecord> = [];
     let bytes = 0;
     for (const record of oldestFirst) {
-      const size = encodeJson(record).length;
+      const size = utf8.encode(encodeJson(record)).length;
       if (records.length > 0 && bytes + size > INTAKE_BYTES) break;
       records.push(record);
       bytes += size;

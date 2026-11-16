@@ -68,6 +68,37 @@ export interface McpToolSession {
 }
 
 /**
+ * A `CallToolResult` repeats its structured payload as text. Callers that read the whole result,
+ * not one field as native MCP clients do, keep the structured copy and any other content.
+ */
+export function withoutRepeatedStructuredText(result: unknown): unknown {
+  if (
+    typeof result !== "object" ||
+    result === null ||
+    !("structuredContent" in result) ||
+    result.structuredContent === undefined ||
+    !("content" in result) ||
+    !Array.isArray(result.content)
+  )
+    return result;
+  const encoded = JSON.stringify(result.structuredContent);
+  return {
+    ...result,
+    content: result.content.filter(
+      (part: unknown) =>
+        !(
+          typeof part === "object" &&
+          part !== null &&
+          "type" in part &&
+          part.type === "text" &&
+          "text" in part &&
+          part.text === encoded
+        ),
+    ),
+  };
+}
+
+/**
  * One initialized MCP session over Heiwa's HTTP endpoint, terminated when
  * the scope closes. Used by the ACP terminal fallback and `heiwa thread`.
  */
@@ -363,7 +394,7 @@ export async function runAcpMcpCliFastPath(
     process.exitCode = 2;
     return;
   }
-  let result = await Effect.runPromise(
+  let result: unknown = await Effect.runPromise(
     callAcpMcpTool({
       endpoint,
       authorization,
@@ -371,30 +402,6 @@ export async function runAcpMcpCliFastPath(
       arguments: parsed as Record<string, unknown>,
     }),
   );
-  // Terminal callers see both fields, unlike native MCP clients that choose one.
-  if (
-    typeof result === "object" &&
-    result !== null &&
-    "structuredContent" in result &&
-    result.structuredContent !== undefined &&
-    "content" in result &&
-    Array.isArray(result.content)
-  ) {
-    const encoded = JSON.stringify(result.structuredContent);
-    result = {
-      ...result,
-      content: result.content.filter(
-        (part: unknown) =>
-          !(
-            typeof part === "object" &&
-            part !== null &&
-            "type" in part &&
-            part.type === "text" &&
-            "text" in part &&
-            part.text === encoded
-          ),
-      ),
-    };
-  }
+  result = withoutRepeatedStructuredText(result);
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
