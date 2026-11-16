@@ -177,6 +177,12 @@ const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&
 
 export const crossFileTests = (files: ReadonlyArray<string>, affected: ReadonlyArray<string>) => [
   ...(affected.includes("t3") ? ["apps/server/src/provider/AgentContextBudget.test.ts"] : []),
+  ...(files.includes("apps/desktop/src/app/DesktopUserData.ts")
+    ? [
+        "apps/desktop/src/app/DesktopClerk.test.ts",
+        "apps/desktop/src/app/DesktopAppIdentity.test.ts",
+      ]
+    : []),
   ...(files.some((file) => file.startsWith("apps/mobile/src/") && CODE.test(file))
     ? ["apps/mobile/src/dependency-graph.test.ts"]
     : []),

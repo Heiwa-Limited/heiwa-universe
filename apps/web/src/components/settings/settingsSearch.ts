@@ -699,6 +699,27 @@ export const SETTINGS_SEARCH_ITEMS = [
     releaseChannelOnly: true,
   },
   {
+    id: "source-update-channel",
+    title: "Follow channel",
+    to: "/settings/about",
+    searchTerms: ["heiwa development dev stable main app updates"],
+    desktopOnly: true,
+  },
+  {
+    id: "source-app-updates",
+    title: "App updates",
+    to: "/settings/about",
+    searchTerms: ["heiwa check update restart install github"],
+    desktopOnly: true,
+  },
+  {
+    id: "source-app-rollback",
+    title: "Previous app",
+    to: "/settings/about",
+    searchTerms: ["heiwa rollback restore previous version"],
+    desktopOnly: true,
+  },
+  {
     id: "cli-command",
     title: "t3 command",
     to: "/settings/about",

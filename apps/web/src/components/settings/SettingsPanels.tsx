@@ -1,3 +1,4 @@
+import { SourceUpdatesSettings } from "./SourceUpdatesSettings";
 import { useAtomValue } from "@effect/atom-react";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
@@ -150,6 +151,18 @@ function AboutVersionTitle() {
 }
 
 function AboutVersionSection() {
+  if (window.desktopBridge?.sourceUpdates && APP_VERSION.includes("-preview.")) {
+    return (
+      <>
+        <SourceUpdatesSettings />
+        <CliCommandSettingsRow />
+      </>
+    );
+  }
+  return <ReleaseVersionSection />;
+}
+
+function ReleaseVersionSection() {
   const updateState = useDesktopUpdateState();
   const [switchChannel, setSwitchChannel] = useState<DesktopUpdateChannel | null>(null);
   const [isUpdateActionPending, setIsUpdateActionPending] = useState(false);

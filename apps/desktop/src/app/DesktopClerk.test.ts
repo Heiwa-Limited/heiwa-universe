@@ -69,6 +69,8 @@ const layerDesktopClerk = (
     stateDir: clerkStateDir,
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
+    baseDir: "/tmp/home/.heiwa",
+    homeDirectory: "/tmp/home",
     platform,
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
