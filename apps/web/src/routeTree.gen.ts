@@ -23,6 +23,7 @@ import { Route as ChatSettingsRouteImport } from './routes/_chat.settings'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatApprovalsRouteImport } from './routes/_chat.approvals'
+import { Route as ChatActivityRouteImport } from './routes/_chat.activity'
 import { Route as ChatSettingsWorktreesRouteImport } from './routes/_chat.settings.worktrees'
 import { Route as ChatSettingsThreadsRouteImport } from './routes/_chat.settings.threads'
 import { Route as ChatSettingsStorageRouteImport } from './routes/_chat.settings.storage'
@@ -120,6 +121,11 @@ const ChatNewRoute = ChatNewRouteImport.update({
 const ChatApprovalsRoute = ChatApprovalsRouteImport.update({
   id: '/approvals',
   path: '/approvals',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatActivityRoute = ChatActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatSettingsWorktreesRoute = ChatSettingsWorktreesRouteImport.update({
@@ -281,6 +287,7 @@ export interface FileRoutesByFullPath {
   '/pair': typeof PairRoute
   '/privacy': typeof PrivacyRoute
   '/welcome': typeof WelcomeRoute
+  '/activity': typeof ChatActivityRoute
   '/approvals': typeof ChatApprovalsRoute
   '/new': typeof ChatNewRoute
   '/pull-requests': typeof ChatPullRequestsRoute
@@ -324,6 +331,7 @@ export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/privacy': typeof PrivacyRoute
   '/welcome': typeof WelcomeRoute
+  '/activity': typeof ChatActivityRoute
   '/approvals': typeof ChatApprovalsRoute
   '/new': typeof ChatNewRoute
   '/pull-requests': typeof ChatPullRequestsRoute
@@ -370,6 +378,7 @@ export interface FileRoutesById {
   '/pair': typeof PairRoute
   '/privacy': typeof PrivacyRoute
   '/welcome': typeof WelcomeRoute
+  '/_chat/activity': typeof ChatActivityRoute
   '/_chat/approvals': typeof ChatApprovalsRoute
   '/_chat/new': typeof ChatNewRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
@@ -417,6 +426,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/privacy'
     | '/welcome'
+    | '/activity'
     | '/approvals'
     | '/new'
     | '/pull-requests'
@@ -460,6 +470,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/privacy'
     | '/welcome'
+    | '/activity'
     | '/approvals'
     | '/new'
     | '/pull-requests'
@@ -505,6 +516,7 @@ export interface FileRouteTypes {
     | '/pair'
     | '/privacy'
     | '/welcome'
+    | '/_chat/activity'
     | '/_chat/approvals'
     | '/_chat/new'
     | '/_chat/pull-requests'
@@ -652,6 +664,13 @@ declare module '@tanstack/react-router' {
       path: '/approvals'
       fullPath: '/approvals'
       preLoaderRoute: typeof ChatApprovalsRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/activity': {
+      id: '/_chat/activity'
+      path: '/activity'
+      fullPath: '/activity'
+      preLoaderRoute: typeof ChatActivityRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/settings/worktrees': {
@@ -925,6 +944,7 @@ const ChatSettingsRouteWithChildren = ChatSettingsRoute._addFileChildren(
 )
 
 interface ChatRouteChildren {
+  ChatActivityRoute: typeof ChatActivityRoute
   ChatApprovalsRoute: typeof ChatApprovalsRoute
   ChatNewRoute: typeof ChatNewRoute
   ChatPullRequestsRoute: typeof ChatPullRequestsRoute
@@ -936,6 +956,7 @@ interface ChatRouteChildren {
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
+  ChatActivityRoute: ChatActivityRoute,
   ChatApprovalsRoute: ChatApprovalsRoute,
   ChatNewRoute: ChatNewRoute,
   ChatPullRequestsRoute: ChatPullRequestsRoute,

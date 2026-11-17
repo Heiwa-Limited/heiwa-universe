@@ -29,10 +29,6 @@ import {
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
 import { filterFilesystemBrowseEntries } from "@t3tools/client-runtime/state/filesystem";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { KnownTerminalSession } from "@t3tools/client-runtime/state/terminal";
-import { getTerminalLabel, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
-import type { ScopedThreadRef } from "@t3tools/contracts";
 import { type ReactNode } from "react";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
@@ -767,49 +763,6 @@ export function buildRootGroups(input: {
     });
   }
   return groups;
-}
-
-export interface RunningTerminalEntry {
-  readonly threadRef: ScopedThreadRef;
-  readonly terminalId: string;
-  /** The running command when the server knows it, else the terminal's name. */
-  readonly label: string;
-  readonly terminalName: string;
-  readonly threadTitle: string;
-  readonly projectTitle: string | null;
-}
-
-/** Busy shells whose thread this client knows, so each one has a thread to open. */
-export function buildRunningTerminalEntries(input: {
-  readonly sessions: ReadonlyArray<KnownTerminalSession>;
-  readonly threads: ReadonlyArray<{
-    readonly environmentId: EnvironmentId;
-    readonly id: string;
-    readonly title: string;
-    readonly projectId: string;
-  }>;
-  readonly projectTitleByKey: ReadonlyMap<string, { readonly title: string }>;
-}): RunningTerminalEntry[] {
-  const threadByKey = new Map(
-    input.threads.map((thread) => [`${thread.environmentId}:${thread.id}`, thread]),
-  );
-  return input.sessions.flatMap((session) => {
-    if (!session.state.hasRunningSubprocess) return [];
-    const { environmentId, threadId, terminalId } = session.target;
-    const thread = threadByKey.get(`${environmentId}:${threadId}`);
-    if (!thread) return [];
-    return [
-      {
-        threadRef: scopeThreadRef(environmentId, threadId),
-        terminalId,
-        label: resolveTerminalSessionLabel(terminalId, session.state.summary),
-        terminalName: getTerminalLabel(terminalId),
-        threadTitle: thread.title,
-        projectTitle:
-          input.projectTitleByKey.get(`${environmentId}:${thread.projectId}`)?.title ?? null,
-      },
-    ];
-  });
 }
 
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {

@@ -1,3 +1,4 @@
+import { buildRunningTerminalEntries } from "@t3tools/client-runtime/state/activity";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { TerminalIcon } from "lucide-react";
@@ -8,7 +9,6 @@ import { useKnownTerminalSessions } from "../state/terminalSessions";
 import { buildThreadRouteParams } from "../threadRoutes";
 import {
   ADDON_ICON_CLASS,
-  buildRunningTerminalEntries,
   ITEM_ICON_CLASS,
   type CommandPaletteActionItem,
   type CommandPaletteSubmenuItem,

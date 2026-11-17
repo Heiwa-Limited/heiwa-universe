@@ -113,6 +113,11 @@ export function readTimelinePosition(threadKey: string) {
   return rememberedTimelinePositions.get(threadKey);
 }
 
+/** The next opening of this thread lands at its live end, where a running command or prompt is. */
+export function forgetTimelinePosition(threadKey: string) {
+  rememberedTimelinePositions.delete(threadKey);
+}
+
 export function rememberTimelinePosition(
   threadKey: string,
   position: RememberedTimelinePosition,

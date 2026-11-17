@@ -232,6 +232,15 @@ from its context menu, or **Copy thread** from its long-press menu on mobile.
 **Thread ID** copies the bare ID for scripts and the `t3` CLI. See
 [keybindings](./keybindings.md) for custom configuration.
 
+## See what is running
+
+On web and desktop, **Activity** in the sidebar footer, **Open activity** in the
+command palette, or `Cmd/Ctrl+Shift+U` lists live agent runs and busy terminals
+across connected environments. Runs waiting on you come first. Choosing a run
+opens its thread at the end, where its latest output or open question is.
+Choosing a terminal opens its thread and puts the cursor in that exact shell. A
+row leaves the list as soon as its run settles or its command exits.
+
 ## Inspect agent work
 
 **Limited** means the provider stopped on a usage or rate limit. The conversation

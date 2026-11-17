@@ -2,13 +2,14 @@ import { useNavigate, type AnyRouter } from "@tanstack/react-router";
 
 import { GUEST_PAGE_PATH } from "../../guestPage";
 
-/** Settings, Usage and Approvals open as modals over the last main-app view. */
+/** Settings, Usage, Approvals and Activity open as modals over the last main-app view. */
 export function isAppModalPage(pathname: string) {
   return (
     pathname === "/settings" ||
     pathname.startsWith("/settings/") ||
     pathname === "/usage" ||
-    pathname === "/approvals"
+    pathname === "/approvals" ||
+    pathname === "/activity"
   );
 }
 
