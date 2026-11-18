@@ -51,6 +51,7 @@ import {
 } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
+  ActivityIcon,
   ArrowLeftIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
@@ -1511,6 +1512,18 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  actionItems.push({
+    kind: "action",
+    value: "action:activity",
+    searchTerms: ["activity", "running", "live", "runs", "agents", "terminals", "shells", "busy"],
+    title: "Open activity",
+    icon: <ActivityIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "activity.open",
+    run: async () => {
+      await navigate({ to: "/activity" });
+    },
+  });
 
   actionItems.push({
     kind: "action",

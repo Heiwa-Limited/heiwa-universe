@@ -1,20 +1,9 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import {
-  EnvironmentId,
-  ProjectId,
-  ProviderInstanceId,
-  ThreadId,
-  type TerminalSummary,
-} from "@t3tools/contracts";
-import {
-  EMPTY_TERMINAL_SESSION_STATE,
-  type KnownTerminalSession,
-} from "@t3tools/client-runtime/state/terminal";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {
   buildNestedSearchItems,
-  buildRunningTerminalEntries,
   resolveCommandPaletteProject,
   buildThreadActionItems,
   buildLinkedThreadActionItems,
@@ -66,61 +55,6 @@ describe("linked pull request thread navigation", () => {
     expect(items[0]?.description).toBe("Archived thread");
     await items[0]?.run();
     expect(runThread).toHaveBeenCalledWith({ environmentId, id });
-  });
-});
-
-describe("buildRunningTerminalEntries", () => {
-  it("lists busy shells of known threads with their command, thread and project", () => {
-    const environmentId = EnvironmentId.make("local");
-    const session = (
-      threadId: string,
-      terminalId: string,
-      hasRunningSubprocess: boolean,
-      label: string,
-    ): KnownTerminalSession => {
-      const summary: TerminalSummary = {
-        threadId,
-        terminalId,
-        cwd: "/repo",
-        worktreePath: null,
-        status: "running",
-        pid: 10,
-        exitCode: null,
-        exitSignal: null,
-        hasRunningSubprocess,
-        label,
-        updatedAt: "2026-11-16T00:00:00.000Z",
-      };
-      return {
-        target: { environmentId, threadId: ThreadId.make(threadId), terminalId },
-        state: { ...EMPTY_TERMINAL_SESSION_STATE, summary, hasRunningSubprocess },
-      };
-    };
-
-    const entries = buildRunningTerminalEntries({
-      sessions: [
-        session("busy-thread", "term-1", true, "sleep 300"),
-        session("busy-thread", "term-2", false, "Terminal 2"),
-        session("idle-thread", "term-1", false, "Terminal 1"),
-        session("unknown-thread", "term-1", true, "npm run dev"),
-      ],
-      threads: [
-        { environmentId, id: "busy-thread", title: "Build", projectId: "web" },
-        { environmentId, id: "idle-thread", title: "Docs", projectId: "web" },
-      ],
-      projectTitleByKey: new Map([["local:web", { title: "Heiwa" }]]),
-    });
-
-    expect(entries).toEqual([
-      {
-        threadRef: { environmentId, threadId: "busy-thread" },
-        terminalId: "term-1",
-        label: "sleep 300",
-        terminalName: "Terminal 1",
-        threadTitle: "Build",
-        projectTitle: "Heiwa",
-      },
-    ]);
   });
 });
 

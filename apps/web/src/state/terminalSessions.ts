@@ -19,9 +19,18 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
 
+import { useAtomValue } from "@effect/atom-react";
+
+import { environmentAtomList, environmentIdsKey } from "./environmentAtomList";
+import { useEnvironments } from "./environments";
 import { formatEnvironmentQueryError, useEnvironmentQuery } from "./query";
 import { terminalEnvironment } from "./terminal";
-import { environmentSession, sessionHasScope, useEnvironmentScope } from "./session";
+import {
+  environmentSession,
+  sessionHasScope,
+  useEnvironmentScope,
+  useEnvironmentsWithScope,
+} from "./session";
 
 const EMPTY_KNOWN_TERMINAL_SESSIONS = Object.freeze<ReadonlyArray<KnownTerminalSession>>([]);
 
@@ -210,6 +219,31 @@ export function useKnownTerminalSessions(input: {
   return metadata.data === null || metadata.error !== null
     ? null
     : selectKnownTerminalSessions(metadata.data, input.environmentId, input.threadId);
+}
+
+const terminalMetadataListAtom = environmentAtomList(
+  "web-terminal-metadata:list",
+  (environmentId) => terminalEnvironment.metadata({ environmentId, input: null }),
+);
+
+/** Known shells in every connected environment whose terminal metadata this session may read. */
+export function useAllKnownTerminalSessions(): ReadonlyArray<KnownTerminalSession> {
+  const { environments } = useEnvironments();
+  const connected = environments.filter(
+    (environment) => environment.connection.phase === "connected",
+  );
+  const readable = useEnvironmentsWithScope(connected, AuthTerminalReadScope);
+  const environmentIds = connected
+    .map((environment) => environment.environmentId)
+    .filter((environmentId) => readable.has(environmentId));
+  const results = useAtomValue(terminalMetadataListAtom(environmentIdsKey(environmentIds)));
+  return environmentIds.flatMap((environmentId, index) =>
+    selectKnownTerminalSessions(
+      AsyncResult.getOrElse(results[index]!, () => null),
+      environmentId,
+      null,
+    ),
+  );
 }
 
 export function useThreadRunningTerminalIds(input: {

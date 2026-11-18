@@ -1,4 +1,5 @@
 import {
+  ActivityIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
   ChartNoAxesColumnIcon,
@@ -274,6 +275,11 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/usage" });
   };
 
+  const handleActivityClick = () => {
+    closeMobileSidebar();
+    void navigate({ to: "/activity" });
+  };
+
   const handleBackClick = () => {
     closeMobileSidebar();
     void navigateToMainApp();
@@ -306,6 +312,11 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
             onClick={handleUsageClick}
+          />
+          <SidebarUtilityItem
+            icon={<ActivityIcon />}
+            label="Activity"
+            onClick={handleActivityClick}
           />
           <SidebarApprovalsItem onNavigate={closeMobileSidebar} />
         </>
