@@ -60,6 +60,8 @@ describe("V2 preview upgrade", () => {
         [78, "NativeProposalSource"],
         [79, "NativeIntakeCursor"],
         [80, "NativeWatchCheck"],
+        [81, "NativeIntakeKeyset"],
+        [82, "MailIntakeAckPrompt"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -163,6 +165,8 @@ describe("V2 preview upgrade", () => {
         [78, "NativeProposalSource"],
         [79, "NativeIntakeCursor"],
         [80, "NativeWatchCheck"],
+        [81, "NativeIntakeKeyset"],
+        [82, "MailIntakeAckPrompt"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );

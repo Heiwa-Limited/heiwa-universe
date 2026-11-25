@@ -91,6 +91,12 @@ export class NativeHost extends Context.Service<
       { readonly records: ReadonlyArray<NativeSnapshot>; readonly truncated: boolean },
       NativeWorkflowError
     >;
+    /** Intake's keyset page. Server-internal: clients read Mail through `read`. */
+    readonly mailIntake: (
+      after: MailIndex.MailCursor,
+      limit: number,
+      resourceIds: ReadonlyArray<string>,
+    ) => Effect.Effect<MailIndex.MailIntakePage, NativeWorkflowError>;
     readonly inspect: (
       app: NativeApp,
       resourceId: string,
@@ -409,6 +415,12 @@ const make = Effect.gen(function* () {
           detail: "No complete native read returned.",
         });
       return { records: result.records, truncated: result.truncated };
+    }),
+    mailIntake: Effect.fn("NativeHost.mailIntake")(function* (after, limit, resourceIds) {
+      if (resourceIds.length === 0) return { records: [], truncated: false };
+      return yield* withMailIndex((db) =>
+        MailIndex.intake(db, { urls: resourceIds, after, limit }),
+      );
     }),
     inspect: Effect.fn("NativeHost.inspect")(function* (app, resourceId, id) {
       if (app === "mail") return yield* mail.inspect(resourceId, id);

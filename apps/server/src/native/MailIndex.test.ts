@@ -86,6 +86,47 @@ it("reads newest unread mail, excludes deleted rows and matches queries literall
   assert.isUndefined(MailIndex.message(db, "1 OR 1=1"));
 });
 
+it("pages intake oldest first by received second then ROWID, within a true LIMIT", () => {
+  const db = fixture();
+  // ROWIDs disagree with arrival order; 31-33 and 35 share a second; 34 is read, 35 deleted,
+  // 36 in an unselected mailbox.
+  db.exec(`INSERT INTO messages VALUES
+    (30, 1, NULL, 2, NULL, 1793500002, 1, 0, 0),
+    (31, 1, NULL, 2, NULL, 1793500001, 1, 0, 0),
+    (32, 1, NULL, 2, NULL, 1793500001, 1, 0, 0),
+    (33, 1, NULL, 2, NULL, 1793500001, 1, 0, 0),
+    (34, 1, NULL, 2, NULL, 1793500000, 1, 1, 0),
+    (35, 1, NULL, 2, NULL, 1793500001, 1, 0, 1),
+    (36, 1, NULL, 2, NULL, 1793500003, 2, 0, 0),
+    (37, 1, NULL, 2, NULL, 1793500002, 1, 0, 0);`);
+  const urls = ["imap://ACCT/INBOX"];
+  const pages: Array<Array<string>> = [];
+  let after: MailIndex.MailCursor = { received: 1793400100, id: 11 };
+  for (;;) {
+    const page = MailIndex.intake(db, { urls, after, limit: 2 });
+    if (page.records.length === 0) {
+      assert.isFalse(page.truncated);
+      break;
+    }
+    pages.push(page.records.map((entry) => entry.record.id));
+    assert.equal(page.truncated, pages.length < 3);
+    after = page.records.at(-1)!.cursor;
+  }
+  assert.deepStrictEqual(pages, [["31", "32"], ["33", "30"], ["37"]]);
+  assert.deepStrictEqual(after, { received: 1793500002, id: 37 });
+  // Id 0 means "from this second on", which is what a cursor saved before keyset intake meant.
+  assert.deepStrictEqual(
+    MailIndex.intake(db, { urls, after: { received: 1793400100, id: 0 }, limit: 1 }).records.map(
+      (entry) => entry.record.id,
+    ),
+    ["11"],
+  );
+  assert.deepStrictEqual(MailIndex.intake(db, { urls: [], after, limit: 5 }), {
+    records: [],
+    truncated: false,
+  });
+});
+
 it("finds a saved draft by exact subject in the same account after the high-water mark", () => {
   const db = fixture();
   db.exec(`INSERT INTO mailboxes VALUES (4, 'imap://ACCT/Drafts', 0), (5, 'imap://OTHER/Drafts', 0);

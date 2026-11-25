@@ -5,7 +5,7 @@ import { ScheduledTaskId } from "./baseSchemas.ts";
 /** One fixed id, so a client can find, pause and resume the inbox watch without a lookup. */
 export const MAIL_INTAKE_TASK_ID = ScheduledTaskId.make("heiwa:mail-intake");
 export const MAIL_INTAKE_PROMPT =
-  "Run mail intake once. If it returns no messages, reply 'No new mail' and stop without calling another tool. Otherwise, for each returned message that asks to meet, stage one calendar event in one of my selected calendars, then stop. Stage each event only once.";
+  "Run mail intake once. If it returns no messages, reply 'No new mail' and stop without calling another tool. Otherwise, for each returned message that asks to meet, stage one calendar event in one of my selected calendars. If the batch is marked redelivered, skip any message whose event is already staged. Stage each event only once. When every message is handled, run mail intake with ack set to true, then stop.";
 
 /** Civil-date round trip rejects Date.parse's silent normalization of impossible days. */
 export function isNativeInstant(value: string): boolean {
@@ -182,6 +182,8 @@ export const NativeWorkflowInput = Schema.Struct({
   start: Schema.optional(Instant),
   end: Schema.optional(Instant),
   limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))),
+  /** mail-intake: this chat finished its batch; do not send it again. */
+  ack: Schema.optional(Schema.Boolean),
 });
 export class NativeWorkflowError extends Schema.TaggedError<NativeWorkflowError>()(
   "NativeWorkflowError",
@@ -211,6 +213,10 @@ export const NativeWorkflowResult = Schema.Struct({
       records: Schema.Array(NativeRecord),
       truncated: Schema.Boolean,
       error: Schema.NullOr(Schema.String),
+      /** mail-intake: the batch is held for this chat until it is acknowledged or the hold expires. */
+      claim: Schema.optional(
+        Schema.Struct({ redelivered: Schema.Boolean, expiresAt: Schema.String }),
+      ),
     }),
   ),
 });
