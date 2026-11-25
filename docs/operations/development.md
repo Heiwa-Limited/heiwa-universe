@@ -300,7 +300,7 @@ The detached helper survives app shutdown and leaves `app-operation.json` plus
 cannot replace the canonical installed app. These are source-build controls, not a
 published binary release feed.
 
-Heiwa has no release feed yet. On the owner's Mac, `~/Applications/Heiwa.app` is built from the
+Heiwa has no release feed yet. On the owner's Mac, `/Applications/Heiwa.app` is built from the
 tip of `origin/dev` or `origin/main` with:
 
 ```sh

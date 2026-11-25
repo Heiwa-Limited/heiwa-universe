@@ -8,6 +8,6 @@ Apple operations and packaged workflows are shared services used by the app, age
 
 Heiwa's identity, data and update authority are independent from upstream T3. Preserve upstream attribution while using Heiwa's own consent and account-registration identity. Product telemetry is off unless a Heiwa endpoint and an explicit opt-in are configured.
 
-The canonical desktop installation is `~/Applications/Heiwa.app`. Development and migration use isolated profiles. Preserve old state until a verified migration and replacement exist; do not run two authorities against one live profile.
+The canonical desktop installation is `/Applications/Heiwa.app`; `desktop:channel` manages whichever single Heiwa.app is installed and refuses to guess between two. Development and migration use isolated profiles. Preserve old state until a verified migration and replacement exist; do not run two authorities against one live profile.
 
 Build beyond coding: conversations must support Apple-native productivity, local models, reusable workflows and code projects without requiring users to understand provider protocols or implementation details.

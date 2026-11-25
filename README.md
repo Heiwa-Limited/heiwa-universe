@@ -8,7 +8,7 @@ Heiwa is a preview. There is no public installer or update feed; the app is buil
 
 Use the pinned Node and package manager versions with Vite+. Install workspace dependencies, then run `vp run dev --no-seed --home-dir <isolated-profile>`. Development in a linked worktree defaults to its own `.heiwa-dev` directory. Never point a development server at a live profile.
 
-To install a build as `~/Applications/Heiwa.app`, run `vp run desktop:channel install`; see [Installing the dev or main channel](docs/operations/development.md#installing-the-dev-or-main-channel).
+To install a build as `/Applications/Heiwa.app` (or update the one already installed), run `vp run desktop:channel install`; see [Installing the dev or main channel](docs/operations/development.md#installing-the-dev-or-main-channel).
 
 The runtime owns durable work and side effects. The app, CLI and MCP tools share its services. Product analytics is disabled by default. Upstream service accounts, update feeds and private credentials are not part of this fork.
 
