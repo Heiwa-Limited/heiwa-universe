@@ -203,8 +203,10 @@ function MeetingTriage(props: {
     <section className="mt-8">
       <h3 className="text-sm font-medium">Meeting triage</h3>
       <p className="mt-1 max-w-lg text-xs text-muted-foreground">
-        Paste a short excerpt to check whether it describes a meeting. Apple&apos;s on-device model
-        runs on {props.environmentLabel}. Nothing is saved, sent elsewhere or added to Calendar.
+        Paste a short excerpt to check whether it describes a meeting. {props.environmentLabel}{" "}
+        receives the excerpt and Apple&apos;s on-device model processes it there. Heiwa does not
+        save it or change Calendar. The label is a suggestion: wording inside an excerpt can lead to
+        a wrong one.
       </p>
       <Textarea
         className="mt-3"
