@@ -2791,7 +2791,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     ...(platform === "win"
       ? { asar: { smartUnpack: false }, asarUnpack: [WINDOWS_NATIVE_ASAR_UNPACK_GLOB] }
       : {}),
-    ...(platform === "mac" ? { asarUnpack: ["**/dist/native/heiwa-apple"] } : {}),
+    ...(platform === "mac"
+      ? { asarUnpack: ["**/dist/native/heiwa-apple", "**/dist/native/heiwa-model"] }
+      : {}),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
       { from: `${licenseRoot}/LICENSE`, to: "licenses/T3-LICENSE.txt" },

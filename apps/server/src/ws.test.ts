@@ -1,6 +1,7 @@
 import { LocalProvision } from "./provider/local/LocalProvision.ts";
 import { DecisionsBridge } from "./decisions/DecisionsBridge.ts";
 import { NativeWorkflows } from "./native/NativeWorkflows.ts";
+import { NativeModel } from "./native/NativeModel.ts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -483,6 +484,7 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
 const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(DocumentText.DocumentText)({}),
   Layer.mock(NativeWorkflows)({}),
+  Layer.mock(NativeModel)({}),
   Layer.mock(DecisionsBridge)({}),
   Layer.mock(LocalProvision)({}),
   Layer.mock(ServerSecretStore.ServerSecretStore)({}),

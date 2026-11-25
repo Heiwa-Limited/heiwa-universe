@@ -48,6 +48,14 @@ intake**: change how often it runs, its instructions or its model in **Settings 
 
 It needs a local model connected under **Settings > Providers**.
 
+## Check whether a message is a meeting
+
+Under **Meeting triage** in **Settings > Apple apps**, paste a short excerpt (up to 1,000
+characters) and run it. Apple's on-device model on the selected Mac answers **Meeting**, **Needs
+clarification** or **Other**. The excerpt stays on that Mac: it is not saved, not sent to another
+model and nothing is added to Calendar. It needs a Mac with Apple silicon, macOS 26 or later and
+Apple Intelligence turned on; otherwise Heiwa says what is missing.
+
 ## Limits
 
 - Heiwa saves mail as drafts. It never sends mail.

@@ -8,6 +8,7 @@ import {
   MAIL_INTAKE_TASK_ID,
   type NativeApp,
   type NativeResource,
+  type NativeTriageKind,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
@@ -19,6 +20,7 @@ import {
   nativeSelect,
   nativeStatus,
   nativeStatusLive,
+  nativeTriage,
 } from "../../state/native";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
@@ -28,6 +30,7 @@ import { useSettingsScope } from "./SettingsScopeContext";
 import { SettingsPageContainer } from "./settingsLayout";
 import { SettingsGroup } from "./SettingsGroup";
 import { Button } from "../ui/button";
+import { Textarea } from "../ui/textarea";
 import { ScheduledRelativeLabel, scheduleLabel } from "./ScheduledTasksSettings";
 
 const apps = [
@@ -152,6 +155,98 @@ function InboxWatch(props: {
         ) : null}
       </span>
     </label>
+  );
+}
+const triageLabels: Record<NativeTriageKind, string> = {
+  meeting: "Meeting",
+  "needs-clarification": "Needs clarification",
+  other: "Other",
+};
+const TRIAGE_MAX_LENGTH = 1000;
+/** Mounted per environment, so a switch drops the excerpt and any late reply. */
+function MeetingTriage(props: {
+  readonly environmentId: EnvironmentId;
+  readonly environmentLabel: string;
+}) {
+  const { environmentId } = props;
+  const canRun = useAtomValue(nativeTriage.permissionAtom(environmentId));
+  const triage = useAtomCommand(nativeTriage);
+  const [excerpt, setExcerpt] = useState("");
+  const [running, setRunning] = useState(false);
+  const [outcome, setOutcome] = useState<
+    | { readonly kind: NativeTriageKind }
+    | { readonly unavailable: string }
+    | { readonly error: string }
+    | null
+  >(null);
+  const blank = excerpt.trim().length === 0;
+  const run = async () => {
+    if (!canRun || running || blank) return;
+    setRunning(true);
+    setOutcome(null);
+    const result = await triage({ environmentId, input: { excerpt } }).finally(() =>
+      setRunning(false),
+    );
+    if (result._tag === "Success") {
+      setOutcome({ kind: result.value.kind });
+      return;
+    }
+    const error = Cause.squash(result.cause);
+    const detail = error instanceof Error ? error.message : "The on-device model did not respond.";
+    setOutcome(
+      typeof error === "object" && error !== null && "code" in error && error.code === "unavailable"
+        ? { unavailable: detail }
+        : { error: detail },
+    );
+  };
+  return (
+    <section className="mt-8">
+      <h3 className="text-sm font-medium">Meeting triage</h3>
+      <p className="mt-1 max-w-lg text-xs text-muted-foreground">
+        Paste a short excerpt to check whether it describes a meeting. Apple&apos;s on-device model
+        runs on {props.environmentLabel}. Nothing is saved, sent elsewhere or added to Calendar.
+      </p>
+      <Textarea
+        className="mt-3"
+        size="sm"
+        aria-label="Excerpt to triage"
+        placeholder="Team rehearsal at 3 pm on Friday."
+        maxLength={TRIAGE_MAX_LENGTH}
+        value={excerpt}
+        disabled={running}
+        onChange={(event) => {
+          setExcerpt(event.currentTarget.value);
+          setOutcome(null);
+        }}
+      />
+      <div className="mt-2 flex items-center justify-between gap-4">
+        <span className="text-xs text-muted-foreground">
+          {excerpt.length}/{TRIAGE_MAX_LENGTH}
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canRun || running || blank}
+          onClick={() => void run()}
+        >
+          {running ? "Classifying…" : `Run on ${props.environmentLabel}`}
+        </Button>
+      </div>
+      {outcome && "kind" in outcome ? (
+        <p role="status" className="mt-2 text-sm">
+          {triageLabels[outcome.kind]}
+          <span className="ml-2 text-xs text-muted-foreground">on {props.environmentLabel}</span>
+        </p>
+      ) : outcome && "unavailable" in outcome ? (
+        <p role="status" className="mt-2 text-sm text-muted-foreground">
+          Unavailable on {props.environmentLabel}: {outcome.unavailable}
+        </p>
+      ) : outcome ? (
+        <p role="alert" className="mt-2 text-sm text-destructive">
+          {outcome.error}
+        </p>
+      ) : null}
+    </section>
   );
 }
 export function AppleAppsSettings() {
@@ -348,6 +443,13 @@ export function AppleAppsSettings() {
           );
         })}
       </SettingsGroup>
+      {environmentId && environment ? (
+        <MeetingTriage
+          key={environmentId}
+          environmentId={environmentId}
+          environmentLabel={environment.label}
+        />
+      ) : null}
       <section className="mt-8 flex items-center justify-between gap-4">
         <p className="text-sm text-muted-foreground">
           {waiting === 0

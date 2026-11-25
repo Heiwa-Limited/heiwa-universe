@@ -45,6 +45,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.nativeResolve]: "native",
   [WS_METHODS.nativeApprove]: "native",
   [WS_METHODS.nativeWorkflow]: "native",
+  [WS_METHODS.nativeTriage]: "native",
   [WS_METHODS.serverGetConfig]: "server",
   [WS_METHODS.serverRefreshProviders]: "server",
   [WS_METHODS.serverUpdateProvider]: "server",

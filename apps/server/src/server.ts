@@ -1,5 +1,6 @@
 import * as LocalProvision from "./provider/local/LocalProvision.ts";
 import * as NativeWorkflows from "./native/NativeWorkflows.ts";
+import * as NativeModel from "./native/NativeModel.ts";
 import * as DecisionsBridge from "./decisions/DecisionsBridge.ts";
 import * as NativeHost from "./native/NativeHost.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -719,6 +720,7 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
 const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(LocalProvision.layer),
   Layer.provideMerge(layerNativeWorkflows),
+  Layer.provideMerge(NativeModel.layer),
   Layer.provideMerge(DecisionsBridge.layer),
   Layer.provideMerge(layerUsage),
   Layer.provideMerge(layerBackground),
