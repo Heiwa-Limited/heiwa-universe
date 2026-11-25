@@ -5,13 +5,14 @@ import { AsyncResult } from "effect/reactivity";
 import { environmentIdsKey } from "../../state/environmentAtomList";
 import { useEnvironments } from "../../state/environments";
 import { useThreadShells } from "../../state/entities";
+import { decisionsStatusListAtom } from "../../state/decisions";
 import { nativeStatusListAtom } from "../../state/native";
 import { useEnvironmentsWithScope } from "../../state/session";
 import { resolveSidebarThreadStatus } from "../Sidebar.logic";
 
 const WAITING_THREAD_STATUSES = new Set(["approval", "input", "request"]);
 
-/** Everything waiting on the user: Apple changes on each Mac, and threads that asked for something. */
+/** Everything waiting on the user: decisions and Apple changes on each Mac, and threads that asked for something. */
 export function useApprovals() {
   const { environments } = useEnvironments();
   const owned = useEnvironmentsWithScope(environments, AuthSettingsWriteScope);
@@ -37,6 +38,15 @@ export function useApprovals() {
       ),
     };
   });
+  const decisionResults = useAtomValue(
+    decisionsStatusListAtom(environmentIdsKey(sources.map((source) => source.environmentId))),
+  );
+  const decisions = sources.flatMap((source, index) => {
+    const status = AsyncResult.getOrElse(decisionResults[index]!, () => null);
+    return status?.available && status.open.length > 0
+      ? [{ environmentId: source.environmentId, label: source.label, open: status.open }]
+      : [];
+  });
   const threads = useThreadShells().flatMap((thread) => {
     if (thread.archivedAt !== null) return [];
     const status = resolveSidebarThreadStatus(thread);
@@ -44,7 +54,11 @@ export function useApprovals() {
   });
   return {
     native,
+    decisions,
     threads,
-    count: threads.length + native.reduce((total, source) => total + source.pending.length, 0),
+    count:
+      threads.length +
+      native.reduce((total, source) => total + source.pending.length, 0) +
+      decisions.reduce((total, source) => total + source.open.length, 0),
   };
 }

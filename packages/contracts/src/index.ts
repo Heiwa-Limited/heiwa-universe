@@ -71,6 +71,7 @@ export * from "./secretReference.ts";
 export * from "./settingsSecretValue.ts";
 export * from "./clientRpcPermissions.ts";
 export * from "./native.ts";
+export * from "./decisions.ts";
 export * from "./localInference.ts";
 
 export * from "./desktopSourceUpdates.ts";
