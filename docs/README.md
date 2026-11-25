@@ -40,6 +40,7 @@ source alone does not explain. Most code changes do not need an internal documen
 [documentation rules](../AGENTS.md#documentation) before adding one.
 
 - [Architecture overview](./internals/overview.md)
+- [Heiwa gateway (proposed)](./internals/heiwa-gateway.md)
 - [What Heiwa takes from the foundation](./internals/foundation.md)
 - [Glossary](./internals/glossary.md)
 - [Connection runtime](./internals/connection-runtime.md)

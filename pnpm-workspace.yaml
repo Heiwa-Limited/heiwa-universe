@@ -78,7 +78,7 @@ catalog:
   tailwindcss: 4.3.3
   tldts: 7.4.2
   typescript: npm:@tsc-rs/typescript@0.8.0
-  undici: 8.11.2
+  undici: 8.12.2
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
   vite-plus: 1.4.0
   ws: 8.22.0
@@ -259,6 +259,18 @@ overrides:
   "@expo/fingerprint": 0.21.5
   app-builder-lib: 26.16.1
   expo-modules-core: 58.0.22
+  # Security floors (osv-scanner, 2026-11-24): same-major patched versions for
+  # transitive dependencies. Remove an entry once every parent requires the fix.
+  "undici@6": ^6.29.1
+  "undici@7": ^7.30.1
+  "zod@4": ^4.6.6
+  seroval: ^1.6.8
+  shell-quote: ^1.11.0
+  proxy-addr: ^2.0.8
+  "path-to-regexp@6": ^6.3.0
+  node-forge: ^1.4.1
+  "body-parser@2": ^2.4.0
+  "@modelcontextprotocol/sdk": ^1.32.0
   # Keep jsdom's optional peer consistent so Vite+ has one test-runner instance.
   "@exodus/bytes>@noble/hashes": "1.8.0"
   # Earlier React Navigation declarations create a circular type alias in TypeScript 7.
