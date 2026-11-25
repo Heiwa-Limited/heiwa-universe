@@ -1,0 +1,72 @@
+name: Dependency Audit
+
+# dependency_review (ci.yml) rejects a pull request that ADDS a vulnerable
+# dependency. This workflow catches advisories published later against what is
+# already on dev: weekly, and whenever the lockfile or the accepted-risk list
+# changes. It is a separate workflow so branch protection's `Check` job is
+# unchanged. Accepted findings live in osv-scanner.toml with an expiry date.
+
+on:
+  schedule:
+    - cron: "17 13 * * 1" # Mondays 13:17 UTC
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths: [pnpm-lock.yaml, osv-scanner.toml, .github/workflows/dependency-audit.yml]
+  pull_request:
+    paths: [pnpm-lock.yaml, osv-scanner.toml, .github/workflows/dependency-audit.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  osv:
+    name: OSV lockfile audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          sparse-checkout: |
+            /pnpm-lock.yaml
+            /osv-scanner.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Install OSV-Scanner
+        run: |
+          set -euo pipefail
+          security_bin="$RUNNER_TEMP/security-bin"
+          mkdir -p "$security_bin"
+          curl --fail --silent --show-error --location \
+            https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64 \
+            --output "$security_bin/osv-scanner"
+          echo "fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8  $security_bin/osv-scanner" | sha256sum --check
+          chmod +x "$security_bin/osv-scanner"
+          echo "$security_bin" >> "$GITHUB_PATH"
+
+      # Fails on any unignored finding with a CVSS score of 7.0 or more.
+      - name: Audit pnpm-lock.yaml
+        run: |
+          set -euo pipefail
+          osv-scanner scan source --config osv-scanner.toml --lockfile pnpm-lock.yaml \
+            --format json --output "$RUNNER_TEMP/osv.json" || true
+          python3 - "$RUNNER_TEMP/osv.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))
+          bad = []
+          for result in data.get("results", []):
+              for pkg in result.get("packages", []):
+                  for group in pkg.get("groups", []):
+                      try:
+                          score = float(group.get("max_severity") or 0)
+                      except ValueError:
+                          score = 0
+                      if score >= 7:
+                          p = pkg["package"]
+                          bad.append(f'{p["name"]}@{p["version"]}  {score}  {", ".join(group["ids"])}')
+          for line in sorted(bad):
+              print(f"::error title=Vulnerable dependency::{line}")
+          print(f"{len(bad)} high/critical finding(s)")
+          sys.exit(1 if bad else 0)
+          PY
