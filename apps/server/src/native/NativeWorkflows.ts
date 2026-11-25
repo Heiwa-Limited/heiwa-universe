@@ -6,7 +6,6 @@ import {
   NativeApp,
   NativeProposal,
   NativeResource,
-  type NativeRecord,
   NativeSource,
   type NativeStatus,
   NativeWriteMode,
@@ -281,15 +280,26 @@ const make = Effect.gen(function* () {
   const instant = (value: DateTime.Utc) => `${DateTime.formatIso(value).slice(0, 19)}Z`;
   // The cursor moves when mail is handed out, not when a run finishes: a failed run misses a
   // suggestion, which costs less than proposing the same email twice.
-  const intakeAfter = Effect.gen(function* () {
+  const intakeCursor = Effect.gen(function* () {
     const rows = yield* sql<{
       after: string;
-    }>`SELECT after FROM heiwa_native_intake WHERE app = 'mail'`;
-    return rows[0]?.after ?? instant(DateTime.subtract(yield* DateTime.now, { days: 1 }));
+      after_id: number | null;
+    }>`SELECT after, after_id FROM heiwa_native_intake WHERE app = 'mail'`;
+    const saved = rows[0] === undefined ? NaN : Date.parse(rows[0].after);
+    // A cursor saved before keyset intake has no id and meant "from this second on".
+    if (Number.isFinite(saved))
+      return { received: Math.floor(saved / 1000), id: rows[0]?.after_id ?? 0 };
+    const since = DateTime.subtract(yield* DateTime.now, { days: 1 });
+    return { received: Math.floor(DateTime.toEpochMillis(since) / 1000), id: 0 };
   });
+  // Intake and the watch share this read, so the watch opens exactly when intake has mail.
+  const pendingMail = (limit: number) =>
+    Effect.gen(function* () {
+      const after = yield* intakeCursor;
+      return { after, page: yield* host.mailIntake(after, limit, yield* selected("mail")) };
+    });
   const mailIntake = Effect.fn("NativeWorkflows.mailIntake")(function* (limit: number) {
-    const after = yield* intakeAfter;
-    const result = yield* read({ app: "mail", start: after, limit }).pipe(Effect.result);
+    const result = yield* pendingMail(limit).pipe(Effect.result);
     if (result._tag === "Failure")
       return {
         app: "mail" as const,
@@ -299,43 +309,37 @@ const make = Effect.gen(function* () {
           ? result.failure.detail
           : "This source could not be read.",
       };
+    const { after, page } = result.success;
     // Oldest first within a byte budget, so a local model's context holds the batch and the
     // cursor stops at the last message handed out; the rest arrive on the next run.
-    const trim = (record: NativeRecord): NativeRecord =>
-      record.body.length > INTAKE_BODY_CHARS
-        ? { ...record, body: `${record.body.slice(0, INTAKE_BODY_CHARS)}…` }
-        : record;
-    const oldestFirst = result.success.records
-      .map(trim)
-      .sort((a, b) => Date.parse(a.start ?? "") - Date.parse(b.start ?? ""));
-    let records: Array<NativeRecord> = [];
+    const entries = page.records.map(({ cursor, record: raw }) => {
+      const record = NativeHost.nativeRecord(raw);
+      const cut = record.body.length > INTAKE_BODY_CHARS;
+      return {
+        cursor,
+        record: cut ? { ...record, body: `${record.body.slice(0, INTAKE_BODY_CHARS)}…` } : record,
+        partial: cut || raw.contentTruncated === true,
+      };
+    });
+    const handed: typeof entries = [];
     let bytes = 0;
-    for (const record of oldestFirst) {
-      const size = utf8.encode(encodeJson(record)).length;
-      if (records.length > 0 && bytes + size > INTAKE_BYTES) break;
-      records.push(record);
+    for (const entry of entries) {
+      const size = utf8.encode(encodeJson(entry.record)).length;
+      if (handed.length > 0 && bytes + size > INTAKE_BYTES) break;
+      handed.push(entry);
       bytes += size;
     }
-    // The cursor is one second past the newest message, so a cut never splits one second: drop
-    // the cut second, or when it is all there is, hand all of it out.
-    const cut = oldestFirst[records.length]?.start;
-    if (cut !== undefined && records.at(-1)?.start === cut) {
-      const before = records.filter((record) => record.start !== cut);
-      records = before.length > 0 ? before : oldestFirst.filter((record) => record.start === cut);
-    }
-    const trimmedAny = result.success.records.some((record) => trim(record) !== record);
-    const newest = Math.max(
-      ...records.map((record) => Date.parse(record.start ?? "")).filter(Number.isFinite),
-    );
-    if (Number.isFinite(newest)) {
-      const next = instant(DateTime.makeUnsafe(newest + 1000));
-      yield* sql`INSERT INTO heiwa_native_intake (app, after) VALUES ('mail', ${next}) ON CONFLICT(app) DO UPDATE SET after = excluded.after`;
-    }
+    // Written on every run so the first run's lookback stays fixed instead of sliding.
+    const next = handed.at(-1)?.cursor ?? after;
+    const nextAfter = instant(DateTime.makeUnsafe(next.received * 1000));
+    yield* sql`INSERT INTO heiwa_native_intake (app, after, after_id) VALUES ('mail', ${nextAfter}, ${next.id}) ON CONFLICT(app) DO UPDATE SET after = excluded.after, after_id = excluded.after_id`;
     return {
       app: "mail" as const,
-      records,
+      records: handed.map((entry) => entry.record),
       truncated:
-        result.success.truncated || trimmedAny || records.length < result.success.records.length,
+        page.truncated ||
+        handed.length < entries.length ||
+        handed.some((entry) => entry.partial),
       error: null,
     };
   });
@@ -529,14 +533,11 @@ const make = Effect.gen(function* () {
   }).pipe(Effect.mapError(storageError));
   // Records every check so a watch that cannot read Mail says so instead of looking quiet.
   const checkMail = Effect.gen(function* () {
-    const result = yield* intakeAfter.pipe(
-      Effect.flatMap((start) => read({ app: "mail", start, limit: 1 })),
-      Effect.result,
-    );
+    const result = yield* pendingMail(1).pipe(Effect.result);
     const outcome =
       result._tag === "Failure"
         ? ("unreadable" as const)
-        : result.success.records.length > 0
+        : result.success.page.records.length > 0
           ? ("new-mail" as const)
           : ("no-new-mail" as const);
     const detail =
