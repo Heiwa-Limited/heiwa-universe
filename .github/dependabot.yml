@@ -1,0 +1,15 @@
+# Keeps the SHA-pinned GitHub Actions current (each `uses:` carries its version
+# in a comment). npm updates stay manual: the pnpm 12 catalog, overrides and
+# minimumReleaseAge policy in pnpm-workspace.yaml are the source of truth, and
+# Dependency Audit (osv-scanner) reports what needs a floor.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
