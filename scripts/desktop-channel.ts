@@ -165,6 +165,40 @@ interface Paths {
   readonly displaced: string;
 }
 
+/** Where a Heiwa.app can live, in preference order when nothing else decides. */
+export const appBundleCandidates = (home: string, join: (...parts: string[]) => string) => [
+  join("/Applications", APP_NAME),
+  join(home, "Applications", APP_NAME),
+];
+
+export interface AppBundleProbe {
+  readonly path: string;
+  readonly exists: boolean;
+  readonly marked: boolean;
+}
+
+/**
+ * The one bundle every command manages. An explicit --app wins; otherwise the single installed
+ * bundle; with two, the one desktop:channel installed (it carries the marker). Two marked or two
+ * unmarked bundles are ambiguous and refused, never resolved by creating a third. With none
+ * installed, /Applications is the default so the app is where macOS users look for it.
+ */
+export function chooseAppBundle(
+  explicit: string | undefined,
+  probes: ReadonlyArray<AppBundleProbe>,
+): { readonly path: string } | { readonly ambiguous: ReadonlyArray<string> } {
+  if (explicit !== undefined) return { path: explicit };
+  const installed = probes.filter((probe) => probe.exists);
+  if (installed.length === 1) return { path: installed[0]!.path };
+  if (installed.length > 1) {
+    const marked = installed.filter((probe) => probe.marked);
+    return marked.length === 1
+      ? { path: marked[0]!.path }
+      : { ambiguous: installed.map((probe) => probe.path) };
+  }
+  return { path: probes[0]!.path };
+}
+
 interface PathFlags {
   readonly app: Option.Option<string>;
   readonly dataDir: Option.Option<string>;
@@ -183,9 +217,25 @@ const resolvePaths = Effect.fn("desktopChannel.resolvePaths")(function* (flags: 
   const dataDir = resolve(flags.dataDir, heiwaHome || path.join(home, PRODUCT_DATA_DIRECTORY));
   const cacheDir = resolve(flags.cacheDir, path.join(home, ".cache", "heiwa-desktop-channels"));
   const backupDir = resolve(flags.backupDir, path.join(home, "heiwa-backups", "heiwa-desktop"));
+  const fs = yield* FileSystem.FileSystem;
+  const probes = yield* Effect.forEach(appBundleCandidates(home, path.join), (candidate) =>
+    Effect.all({
+      path: Effect.succeed(candidate),
+      exists: fs.exists(candidate),
+      marked: fs.exists(path.join(candidate, "Contents", "Resources", PRODUCT_INSTALL_MARKER_FILE)),
+    }),
+  );
+  const chosen = chooseAppBundle(
+    Option.getOrUndefined(Option.map(flags.app, path.resolve)),
+    probes,
+  );
+  if ("ambiguous" in chosen)
+    return yield* fail(
+      `Found ${chosen.ambiguous.join(" and ")}. Pass --app with the one to manage; Heiwa will not guess between two installs.`,
+    );
   return {
     repoRoot: path.resolve(repoRoot),
-    app: resolve(flags.app, path.join(home, "Applications", APP_NAME)),
+    app: chosen.path,
     dataDir,
     database: path.join(dataDir, "userdata", "statev2.sqlite"),
     cacheDir,
@@ -1119,7 +1169,9 @@ const status = Effect.fn("desktopChannel.status")(function* (paths: Paths, offli
 
 const pathFlags = {
   app: Flag.String("app").pipe(
-    Flag.withDescription("App bundle to manage (default ~/Applications/Heiwa.app)."),
+    Flag.withDescription(
+      "App bundle to manage (default: the installed /Applications or ~/Applications Heiwa.app, else /Applications/Heiwa.app).",
+    ),
     Flag.optional,
   ),
   dataDir: Flag.String("data-dir").pipe(

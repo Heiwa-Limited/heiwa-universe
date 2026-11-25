@@ -94,7 +94,11 @@ export const layer = McpToolAccess.toLayer(
     return {
       heiwa_workflow: McpToolAccess.reads((input) =>
         (input.workflow === "mail-intake" ? requireIntakeClient : Effect.void).pipe(
-          Effect.andThen(service.run(input)),
+          // Intake holds a batch for the chat that received it until that chat acknowledges.
+          Effect.andThen(McpInvocationContext.McpInvocationContext),
+          Effect.flatMap((scope) =>
+            service.run(input, scope.thread?.threadId ?? scope.client?.sessionId ?? "mcp"),
+          ),
           Effect.map((result) => ({ ...result, status: { ...result.status, pending: [] } })),
         ),
       ),

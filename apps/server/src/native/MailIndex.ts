@@ -138,6 +138,51 @@ export const messages = (db: NodeSqlite.DatabaseSync, input: MailQuery) => {
   };
 };
 
+/** Intake position: Mail's received second, then ROWID to order messages within that second. */
+export interface MailCursor {
+  readonly received: number;
+  readonly id: number;
+}
+export interface MailIntakePage {
+  readonly records: ReadonlyArray<{ readonly cursor: MailCursor; readonly record: NativeSnapshot }>;
+  readonly truncated: boolean;
+}
+
+/**
+ * Unread mail strictly after `after`, oldest first. The keyset over (received, ROWID) lets intake
+ * page through a backlog of any size, including many messages in one second, without a gap.
+ */
+export const intake = (
+  db: NodeSqlite.DatabaseSync,
+  input: {
+    readonly urls: ReadonlyArray<string>;
+    readonly after: MailCursor;
+    readonly limit: number;
+  },
+): MailIntakePage => {
+  if (input.urls.length === 0) return { records: [], truncated: false };
+  const rows = db
+    .prepare(
+      `${SELECT} WHERE mb.url IN (${input.urls.map(() => "?").join(",")}) AND m.deleted = 0 AND m.read = 0
+       AND (m.date_received > ? OR (m.date_received = ? AND m.ROWID > ?))
+       ORDER BY m.date_received ASC, m.ROWID ASC LIMIT ?`,
+    )
+    .all(
+      ...input.urls,
+      input.after.received,
+      input.after.received,
+      input.after.id,
+      input.limit + 1,
+    ) as Array<MessageRow>;
+  return {
+    records: rows.slice(0, input.limit).map((row) => ({
+      cursor: { received: row.received!, id: row.id },
+      record: snapshot(db, row),
+    })),
+    truncated: rows.length > input.limit,
+  };
+};
+
 export const message = (db: NodeSqlite.DatabaseSync, id: string): NativeSnapshot | undefined => {
   if (!/^\d{1,18}$/.test(id)) return undefined;
   const row = db.prepare(`${SELECT} WHERE m.ROWID = ? AND m.deleted = 0`).get(Number(id)) as

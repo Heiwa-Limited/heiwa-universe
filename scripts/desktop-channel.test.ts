@@ -16,6 +16,8 @@ import {
   selectRestoreSnapshot,
   type Migration,
   type SnapshotRecord,
+  appBundleCandidates,
+  chooseAppBundle,
 } from "./desktop-channel.ts";
 
 const known: Migration[] = [
@@ -164,3 +166,55 @@ it.live("a second installer cannot overwrite the active operation receipt", () =
     assert.equal(yield* fs.readFileString(receipt), "original operation receipt");
   }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+describe("choosing the app bundle", () => {
+  const candidates = appBundleCandidates("/Users/me", (...parts) => parts.join("/"));
+  const system = candidates[0]!;
+  const user = candidates[1]!;
+  const probe = (path: string, exists: boolean, marked = false) => ({ path, exists, marked });
+
+  it("prefers /Applications, then ~/Applications, in that order", () => {
+    assert.deepStrictEqual(
+      [system, user],
+      ["/Applications/Heiwa.app", "/Users/me/Applications/Heiwa.app"],
+    );
+  });
+  it("lets an explicit --app win over anything installed", () => {
+    assert.deepStrictEqual(
+      chooseAppBundle("/tmp/Heiwa.app", [probe(system, true, true), probe(user, true)]),
+      { path: "/tmp/Heiwa.app" },
+    );
+  });
+  it("manages the single installed bundle, marked or not", () => {
+    // The owner's Mac: an unmarked bundle in /Applications and nothing in ~/Applications.
+    assert.deepStrictEqual(chooseAppBundle(undefined, [probe(system, true), probe(user, false)]), {
+      path: system,
+    });
+    assert.deepStrictEqual(
+      chooseAppBundle(undefined, [probe(system, false), probe(user, true, true)]),
+      {
+        path: user,
+      },
+    );
+  });
+  it("picks the bundle desktop:channel installed when two exist", () => {
+    assert.deepStrictEqual(
+      chooseAppBundle(undefined, [probe(system, true), probe(user, true, true)]),
+      { path: user },
+    );
+  });
+  it("refuses two equally plausible bundles instead of creating a third", () => {
+    assert.deepStrictEqual(chooseAppBundle(undefined, [probe(system, true), probe(user, true)]), {
+      ambiguous: [system, user],
+    });
+    assert.deepStrictEqual(
+      chooseAppBundle(undefined, [probe(system, true, true), probe(user, true, true)]),
+      { ambiguous: [system, user] },
+    );
+  });
+  it("installs into /Applications when nothing is installed", () => {
+    assert.deepStrictEqual(chooseAppBundle(undefined, [probe(system, false), probe(user, false)]), {
+      path: system,
+    });
+  });
+});
