@@ -1,0 +1,14 @@
+# Accepted dependency advisories for .github/workflows/dependency-audit.yml.
+# Each entry needs a reason and an expiry; the audit fails again after
+# ignoreUntil so the decision gets revisited. Same-major fixes belong in the
+# pnpm-workspace.yaml "Security floors" overrides instead.
+
+[[IgnoredVulns]]
+id = "GHSA-w5hq-g745-h8pq"
+ignoreUntil = 2027-02-28
+reason = "uuid@7.0.3 via xcode@3.0.1 (Expo native build tooling, not shipped in any app bundle). Fixed only in uuid 11+; waiting on xcode/@expo/config-plugins to move off uuid 7."
+
+[[IgnoredVulns]]
+id = "GHSA-mrhx-c7xc-m3w5"
+ignoreUntil = 2027-02-28
+reason = "zod@3.25.76 via @expo/cli and @vercel/config (build/deploy tooling). Fixed only in zod 4.6.6; zod 4 consumers are pinned to ^4.6.6 by the security floors."
