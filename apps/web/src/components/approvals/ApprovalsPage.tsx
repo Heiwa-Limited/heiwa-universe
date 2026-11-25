@@ -6,6 +6,7 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
 import { ScrollArea } from "../ui/scroll-area";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
+import { DecisionList } from "./Decisions";
 import { ProposalOutcomes, ProposalReviewList } from "./NativeProposals";
 import { useApprovals } from "./useApprovals";
 
@@ -16,7 +17,7 @@ const THREAD_STATUS_LABEL: Record<string, string> = {
 };
 
 export function ApprovalsPage() {
-  const { native, threads, count } = useApprovals();
+  const { native, decisions, threads, count } = useApprovals();
   const navigate = useNavigate();
   const severalMacs = native.filter((source) => source.pending.length > 0).length > 1;
   const outcomes = native.filter((source) => source.recent.length > 0);
@@ -34,11 +35,24 @@ export function ApprovalsPage() {
                 <EmptyHeader>
                   <EmptyTitle>Nothing is waiting for you</EmptyTitle>
                   <EmptyDescription>
-                    Apple changes an agent prepares, and threads that need an answer, appear here.
+                    Decisions only you can make, Apple changes an agent prepares, and threads that
+                    need an answer, appear here.
                   </EmptyDescription>
                 </EmptyHeader>
               </Empty>
             ) : null}
+            {decisions.map((source) => (
+              <section key={`decisions:${source.environmentId}`}>
+                <h2 className="text-sm font-semibold">
+                  Decisions{decisions.length > 1 ? ` on ${source.label}` : ""}
+                </h2>
+                <p className="mt-1 mb-4 text-sm text-muted-foreground">
+                  Prepared from your Messages, Mail, Calendar, Reminders and holdings. Focus a card
+                  and press 1–9 to answer.
+                </p>
+                <DecisionList environmentId={source.environmentId} decisions={source.open} />
+              </section>
+            ))}
             {native.map((source) =>
               source.pending.length === 0 ? null : (
                 <section key={source.environmentId}>

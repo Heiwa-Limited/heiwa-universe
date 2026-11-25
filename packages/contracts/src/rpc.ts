@@ -19,6 +19,7 @@ import {
   NativeWorkflowInput,
   NativeWorkflowResult,
 } from "./native.ts";
+import { DecisionAnswerInput, DecisionAnswerResult, DecisionsStatus } from "./decisions.ts";
 import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
@@ -524,6 +525,8 @@ export const WS_METHODS = {
   nativeApprove: "heiwa.native.approve",
   nativeResolve: "heiwa.native.resolve",
   nativeWorkflow: "heiwa.native.workflow",
+  decisionsStatus: "heiwa.decisions.status",
+  decisionsAnswer: "heiwa.decisions.answer",
   serverRefreshProviders: "server.refreshProviders",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
@@ -706,6 +709,17 @@ const WsNativeApproveRpc = Rpc.make(WS_METHODS.nativeApprove, {
   payload: NativeApprovalInput,
   success: NativeProposal,
   error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+});
+// Decisions never fail on a missing engine: status reports `available: false` instead.
+const WsDecisionsStatusRpc = Rpc.make(WS_METHODS.decisionsStatus, {
+  payload: Schema.Struct({}),
+  success: DecisionsStatus,
+  error: EnvironmentAuthorizationError,
+});
+const WsDecisionsAnswerRpc = Rpc.make(WS_METHODS.decisionsAnswer, {
+  payload: DecisionAnswerInput,
+  success: DecisionAnswerResult,
+  error: EnvironmentAuthorizationError,
 });
 const WsNativeWorkflowRpc = Rpc.make(WS_METHODS.nativeWorkflow, {
   payload: NativeWorkflowInput,
@@ -2053,6 +2067,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsNativeResolveRpc,
   WsNativeApproveRpc,
   WsNativeWorkflowRpc,
+  WsDecisionsStatusRpc,
+  WsDecisionsAnswerRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,

@@ -41,6 +41,8 @@ export const RPC_REQUIRED_SCOPES = {
   ...CLIENT_GUARDED_RPC_SCOPES,
   [WS_METHODS.localModels]: AuthProvidersManageScope,
   [WS_METHODS.nativeStatus]: AuthSettingsWriteScope,
+  [WS_METHODS.decisionsStatus]: AuthSettingsWriteScope,
+  [WS_METHODS.decisionsAnswer]: AuthSettingsWriteScope,
   [WS_METHODS.nativeSubscribe]: AuthSettingsWriteScope,
   [WS_METHODS.nativeRead]: AuthOrchestrationReadScope,
   [WS_METHODS.nativeWorkflow]: AuthOrchestrationReadScope,

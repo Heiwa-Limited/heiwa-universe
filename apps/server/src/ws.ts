@@ -1,5 +1,6 @@
 import * as LocalProvision from "./provider/local/LocalProvision.ts";
 import * as NativeWorkflows from "./native/NativeWorkflows.ts";
+import * as DecisionsBridge from "./decisions/DecisionsBridge.ts";
 import {
   AuthSettingsWriteScope,
   AuthOrchestrationReadScope,
@@ -1381,6 +1382,7 @@ export const layerWsRpc = (
       const triage = yield* TriageService.TriageService;
       const localProvision = yield* LocalProvision.LocalProvision;
       const nativeWorkflows = yield* NativeWorkflows.NativeWorkflows;
+      const decisions = yield* DecisionsBridge.DecisionsBridge;
       const hostResources = yield* HostResources.HostResources;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
@@ -2209,6 +2211,11 @@ export const layerWsRpc = (
           authorizeEffect(AuthSettingsWriteScope, nativeWorkflows.resolve(input.id, input.note)),
         [WS_METHODS.nativeApprove]: (input) =>
           authorizeEffect(AuthSettingsWriteScope, nativeWorkflows.approve(input.id, input.approve)),
+        // Decisions are the owner's: same scope as approving Apple changes.
+        [WS_METHODS.decisionsStatus]: () =>
+          authorizeEffect(AuthSettingsWriteScope, decisions.status),
+        [WS_METHODS.decisionsAnswer]: (input) =>
+          authorizeEffect(AuthSettingsWriteScope, decisions.answer(input)),
         [WS_METHODS.nativeWorkflow]: (input) =>
           authorizeEffect(
             // Intake hands each message out once, so reading it is an operation.
