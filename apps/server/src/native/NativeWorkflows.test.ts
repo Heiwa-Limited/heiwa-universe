@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as MailIndex from "./MailIndex.ts";
 import * as NativeHost from "./NativeHost.ts";
 import * as NativeWorkflows from "./NativeWorkflows.ts";
@@ -99,7 +100,11 @@ const fixture = (apply?: NativeHost.NativeHost["Service"]["apply"]) => {
     /** Adds a message to Mail's index and returns its ROWID as a record id. */
     deliverMail: (
       received: string,
-      { body = "", read = false, mailbox = 1 }: { body?: string; read?: boolean; mailbox?: number } = {},
+      {
+        body = "",
+        read = false,
+        mailbox = 1,
+      }: { body?: string; read?: boolean; mailbox?: number } = {},
     ) => {
       const summary = envelope.prepare("INSERT INTO summaries (summary) VALUES (?)").run(body);
       const row = envelope
@@ -281,50 +286,64 @@ describe("native workflow authority", () => {
       );
     }).pipe(Effect.provide(f.layer));
   });
-  it.effect("hands each new message to intake once, including late arrivals in a handed-out second", () => {
-    const f = fixture();
-    return Effect.gen(function* () {
-      const service = yield* NativeWorkflows.NativeWorkflows;
-      const sql = yield* SqlClient.SqlClient;
-      const intake = () =>
-        service.run({ workflow: "mail-intake" }).pipe(Effect.map((result) => result.sources[0]!));
-      const ids = () =>
-        intake().pipe(Effect.map((source) => source.records.map((record) => record.id)));
-      const watched = () => service.status.pipe(Effect.map((status) => status.mailWatch));
-      assert.equal(yield* watched(), null);
-      // An empty watch stays closed: nothing selected, then nothing unread in the selection.
-      assert.equal(yield* service.hasNewMail, false);
-      yield* service.select("mail", [INBOX]);
-      assert.equal(yield* service.hasNewMail, false);
-      assert.equal((yield* watched())?.outcome, "no-new-mail");
-      f.deliverMail("2026-11-14T10:00:00Z", { read: true });
-      f.deliverMail("2026-11-14T10:00:00Z", { mailbox: 2 });
-      assert.equal(yield* service.hasNewMail, false);
-      const first = f.deliverMail("2026-11-14T10:00:00Z");
-      assert.equal(yield* service.hasNewMail, true);
-      assert.equal((yield* watched())?.outcome, "new-mail");
-      assert.deepStrictEqual(yield* ids(), [first]);
-      assert.equal(yield* service.hasNewMail, false);
-      // Mail that cannot be read keeps the watch closed, says why, and leaves the cursor alone.
-      const sameSecond = f.deliverMail("2026-11-14T10:00:00Z");
-      f.denyMail(true);
-      assert.equal(yield* service.hasNewMail, false);
-      assert.deepInclude(yield* watched(), {
-        outcome: "unreadable",
-        detail: "Allow Heiwa to control Mail.",
-      });
-      const failed = yield* intake();
-      assert.deepStrictEqual([failed.records, failed.error], [[], "Allow Heiwa to control Mail."]);
-      f.denyMail(false);
-      // Indexed after its second was handed out, it still arrives, and only once.
-      assert.equal(yield* service.hasNewMail, true);
-      assert.deepStrictEqual(yield* ids(), [sameSecond]);
-      assert.deepStrictEqual(yield* ids(), []);
-      assert.deepStrictEqual(yield* sql`SELECT after, after_id FROM heiwa_native_intake`, [
-        { after: "2026-11-14T10:00:00Z", after_id: Number(sameSecond) },
-      ]);
-    }).pipe(Effect.provide(f.layer));
-  });
+  it.effect(
+    "hands each new message to intake once, including late arrivals in a handed-out second",
+    () => {
+      const f = fixture();
+      return Effect.gen(function* () {
+        const service = yield* NativeWorkflows.NativeWorkflows;
+        const sql = yield* SqlClient.SqlClient;
+        const intake = () =>
+          service.run({ workflow: "mail-intake" }).pipe(Effect.map((result) => result.sources[0]!));
+        // Each batch is acknowledged after it is read, as the intake agent now must.
+        const ids = () =>
+          intake().pipe(
+            Effect.tap((source) =>
+              source.records.length > 0
+                ? service.run({ workflow: "mail-intake", ack: true })
+                : Effect.void,
+            ),
+            Effect.map((source) => source.records.map((record) => record.id)),
+          );
+        const watched = () => service.status.pipe(Effect.map((status) => status.mailWatch));
+        assert.equal(yield* watched(), null);
+        // An empty watch stays closed: nothing selected, then nothing unread in the selection.
+        assert.equal(yield* service.hasNewMail, false);
+        yield* service.select("mail", [INBOX]);
+        assert.equal(yield* service.hasNewMail, false);
+        assert.equal((yield* watched())?.outcome, "no-new-mail");
+        f.deliverMail("2026-11-14T10:00:00Z", { read: true });
+        f.deliverMail("2026-11-14T10:00:00Z", { mailbox: 2 });
+        assert.equal(yield* service.hasNewMail, false);
+        const first = f.deliverMail("2026-11-14T10:00:00Z");
+        assert.equal(yield* service.hasNewMail, true);
+        assert.equal((yield* watched())?.outcome, "new-mail");
+        assert.deepStrictEqual(yield* ids(), [first]);
+        assert.equal(yield* service.hasNewMail, false);
+        // Mail that cannot be read keeps the watch closed, says why, and leaves the cursor alone.
+        const sameSecond = f.deliverMail("2026-11-14T10:00:00Z");
+        f.denyMail(true);
+        assert.equal(yield* service.hasNewMail, false);
+        assert.deepInclude(yield* watched(), {
+          outcome: "unreadable",
+          detail: "Allow Heiwa to control Mail.",
+        });
+        const failed = yield* intake();
+        assert.deepStrictEqual(
+          [failed.records, failed.error],
+          [[], "Allow Heiwa to control Mail."],
+        );
+        f.denyMail(false);
+        // Indexed after its second was handed out, it still arrives, and only once.
+        assert.equal(yield* service.hasNewMail, true);
+        assert.deepStrictEqual(yield* ids(), [sameSecond]);
+        assert.deepStrictEqual(yield* ids(), []);
+        assert.deepStrictEqual(yield* sql`SELECT after, after_id FROM heiwa_native_intake`, [
+          { after: "2026-11-14T10:00:00Z", after_id: Number(sameSecond) },
+        ]);
+      }).pipe(Effect.provide(f.layer));
+    },
+  );
   it.effect("resumes a cursor saved before keyset intake from its second", () => {
     const f = fixture();
     return Effect.gen(function* () {
@@ -346,6 +365,7 @@ describe("native workflow authority", () => {
         expected,
       );
       assert.isFalse(source.truncated);
+      yield* service.run({ workflow: "mail-intake", ack: true });
       assert.deepStrictEqual(yield* sql`SELECT after, after_id FROM heiwa_native_intake`, [
         { after: "2026-11-14T10:00:06Z", after_id: Number(expected[2]) },
       ]);
@@ -397,6 +417,7 @@ describe("native workflow authority", () => {
             assert.isTrue(source.records.every((record) => record.body.length <= 1_001));
             assert.isTrue(source.truncated);
             batches.push(source.records.map((record) => record.id));
+            yield* service.run({ workflow: "mail-intake", ack: true });
           }
         });
       const restarted = NativeWorkflows.layer.pipe(
@@ -583,4 +604,146 @@ it("limits Mail to drafts, read state and Trash, and keeps recipients on Mail dr
   assert.isFalse(NativeWorkflows.validateAction({ ...create, recipients: ["a@example.com"] }));
   assert.isTrue(NativeWorkflows.sameMailAccount("imap://A/INBOX", "imap://A/%5BGmail%5D/Drafts"));
   assert.isFalse(NativeWorkflows.sameMailAccount("imap://A/INBOX", "imap://B/INBOX"));
+});
+
+describe("durable mail intake", () => {
+  const HOLD = "31 minutes";
+  const take = (holder: string, limit?: number) =>
+    NativeWorkflows.NativeWorkflows.pipe(
+      Effect.flatMap((service) =>
+        service.run({ workflow: "mail-intake", ...(limit === undefined ? {} : { limit }) }, holder),
+      ),
+      Effect.map((result) => result.sources[0]!),
+    );
+  const ack = (holder: string) =>
+    NativeWorkflows.NativeWorkflows.pipe(
+      Effect.flatMap((service) => service.run({ workflow: "mail-intake", ack: true }, holder)),
+      Effect.map((result) => result.sources[0]!),
+    );
+  const ids = (source: { readonly records: ReadonlyArray<{ readonly id: string }> }) =>
+    source.records.map((record) => record.id);
+  /** `claim` exists only on mail-intake sources; other workflows share the result type. */
+  const claimOf = (source: object) =>
+    "claim" in source ? (source.claim as { readonly redelivered: boolean }) : undefined;
+
+  it.effect("redelivers a failed run's batch after its hold, and loses nothing", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const service = yield* NativeWorkflows.NativeWorkflows;
+      yield* service.select("mail", [INBOX]);
+      const batch = [f.deliverMail("2026-11-14T10:00:00Z"), f.deliverMail("2026-11-14T10:00:00Z")];
+      const first = yield* take("thread-a");
+      assert.deepStrictEqual(ids(first), batch);
+      assert.isFalse(claimOf(first)?.redelivered);
+      // thread-a fails without acknowledging. While its hold is live the watch stays closed and
+      // another run gets nothing, so the batch cannot be processed twice at once.
+      assert.isFalse(yield* service.hasNewMail);
+      const blocked = yield* take("thread-b");
+      assert.deepStrictEqual(ids(blocked), []);
+      assert.match(blocked.error ?? "", /Another intake run holds mail/);
+      // The hold expires: the watch opens and the next run gets exactly that batch again.
+      yield* TestClock.adjust(HOLD);
+      assert.isTrue(yield* service.hasNewMail);
+      const again = yield* take("thread-b");
+      assert.deepStrictEqual(ids(again), batch);
+      assert.isTrue(claimOf(again)?.redelivered);
+      // The original holder lost the batch; only the current holder can acknowledge it.
+      assert.match((yield* ack("thread-a")).error ?? "", /holds no unacknowledged mail/);
+      assert.isNull((yield* ack("thread-b")).error);
+      assert.deepStrictEqual(ids(yield* take("thread-c")), []);
+      const later = f.deliverMail("2026-11-14T10:00:01Z");
+      assert.deepStrictEqual(ids(yield* take("thread-c")), [later]);
+    }).pipe(Effect.provide(f.layer));
+  });
+
+  it.effect("returns the same batch to a holder that asks again before acknowledging", () => {
+    const f = fixture();
+    return Effect.gen(function* () {
+      const service = yield* NativeWorkflows.NativeWorkflows;
+      yield* service.select("mail", [INBOX]);
+      const one = f.deliverMail("2026-11-14T10:00:00Z");
+      assert.deepStrictEqual(ids(yield* take("thread-a")), [one]);
+      // Mail that arrives while the batch is held waits for the next batch, not this one.
+      const two = f.deliverMail("2026-11-14T10:00:02Z");
+      assert.deepStrictEqual(ids(yield* take("thread-a")), [one]);
+      yield* ack("thread-a");
+      assert.deepStrictEqual(ids(yield* take("thread-a")), [two]);
+    }).pipe(Effect.provide(f.layer));
+  });
+
+  it.effect("keeps a hold across a server restart", () => {
+    const f = fixture();
+    const restarted = NativeWorkflows.layer.pipe(
+      Layer.provide(Layer.succeed(NativeHost.NativeHost, f.host)),
+    );
+    return Effect.gen(function* () {
+      const service = yield* NativeWorkflows.NativeWorkflows;
+      yield* service.select("mail", [INBOX]);
+      const batch = [f.deliverMail("2026-11-14T10:00:00Z"), f.deliverMail("2026-11-14T10:00:03Z")];
+      assert.deepStrictEqual(ids(yield* take("thread-a")), batch);
+      // The server restarts before thread-a finishes; the hold is in the database, not memory.
+      yield* Effect.gen(function* () {
+        assert.deepStrictEqual(ids(yield* take("thread-b")), []);
+        yield* TestClock.adjust(HOLD);
+        const again = yield* take("thread-b");
+        assert.deepStrictEqual(ids(again), batch);
+        assert.isTrue(claimOf(again)?.redelivered);
+        yield* ack("thread-b");
+        assert.deepStrictEqual(ids(yield* take("thread-b")), []);
+      }).pipe(Effect.provide(restarted));
+    }).pipe(Effect.provide(f.layer));
+  });
+
+  it.effect(
+    "drains a 200-message burst exactly once despite ties, late arrivals and failed runs",
+    () => {
+      const f = fixture();
+      return Effect.gen(function* () {
+        const service = yield* NativeWorkflows.NativeWorkflows;
+        yield* service.select("mail", [INBOX]);
+        // 200 messages over 20 seconds, 40 of them in one second, delivered out of order.
+        const second = (n: number) => `2026-11-14T10:00:${String(n).padStart(2, "0")}Z`;
+        const plan = Array.from({ length: 200 }, (_, i) => (i < 40 ? 7 : (i * 7) % 20));
+        const delivered = plan.map((n) => ({ received: second(n), id: f.deliverMail(second(n)) }));
+        const acknowledged: Array<string> = [];
+        let lateDelivered: { received: string; id: string } | undefined;
+        for (let run = 0; run < 200; run++) {
+          const source = yield* take(`thread-${run}`, 10);
+          if (source.records.length === 0) break;
+          if (run === 3) {
+            // Arrives late, inside a second earlier runs already handed out.
+            lateDelivered = { received: second(7), id: f.deliverMail(second(7)) };
+          }
+          if (run % 4 === 1) {
+            // This run fails before acknowledging: its batch must come back, whole.
+            yield* TestClock.adjust(HOLD);
+            continue;
+          }
+          acknowledged.push(...ids(source));
+          assert.isNull((yield* ack(`thread-${run}`)).error);
+        }
+        const all = [...delivered, ...(lateDelivered ? [lateDelivered] : [])];
+        const expectedIds = new Set(all.map((entry) => entry.id));
+        assert.equal(
+          new Set(acknowledged).size,
+          acknowledged.length,
+          "no message acknowledged twice",
+        );
+        assert.deepStrictEqual(
+          new Set(acknowledged),
+          expectedIds,
+          "every message acknowledged once",
+        );
+        // Acknowledged batches come oldest first by (received second, ROWID), except the late
+        // arrival, which joins the first batch after it was indexed.
+        const order = [...delivered]
+          .sort((a, b) => a.received.localeCompare(b.received) || Number(a.id) - Number(b.id))
+          .map((entry) => entry.id);
+        assert.deepStrictEqual(
+          acknowledged.filter((id) => id !== lateDelivered?.id),
+          order,
+        );
+      }).pipe(Effect.provide(f.layer));
+    },
+  );
 });

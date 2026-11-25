@@ -6,6 +6,7 @@ import {
   NativeApp,
   NativeProposal,
   NativeResource,
+  type NativeRecord,
   NativeSource,
   type NativeStatus,
   NativeWriteMode,
@@ -29,6 +30,8 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const INTAKE_BYTES = 6_000;
 const utf8 = new TextEncoder();
 const INTAKE_BODY_CHARS = 1_000;
+/** How long a chat holds an unacknowledged intake batch before the next run gets it again. */
+const INTAKE_HOLD_MINUTES = 30;
 const decodeResource = Schema.decodeUnknownEffect(Schema.fromJsonString(NativeResource));
 const decodeResources = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(NativeResource)),
@@ -278,40 +281,113 @@ const make = Effect.gen(function* () {
     };
   });
   const instant = (value: DateTime.Utc) => `${DateTime.formatIso(value).slice(0, 19)}Z`;
-  // The cursor moves when mail is handed out, not when a run finishes: a failed run misses a
-  // suggestion, which costs less than proposing the same email twice.
-  const intakeCursor = Effect.gen(function* () {
+  // At-least-once intake: a batch is held for the chat that received it, and the committed
+  // cursor moves only when that chat acknowledges. A run that fails or a server that restarts
+  // leaves the hold to expire, and the same batch goes to the next run, marked redelivered.
+  const secondOf = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+  const intakeState = Effect.gen(function* () {
     const rows = yield* sql<{
       after: string;
       after_id: number | null;
-    }>`SELECT after, after_id FROM heiwa_native_intake WHERE app = 'mail'`;
-    const saved = rows[0] === undefined ? NaN : Date.parse(rows[0].after);
+      claim_after: string | null;
+      claim_after_id: number | null;
+      claim_holder: string | null;
+      claim_until: string | null;
+    }>`SELECT after, after_id, claim_after, claim_after_id, claim_holder, claim_until FROM heiwa_native_intake WHERE app = 'mail'`;
+    const row = rows[0];
+    const now = yield* DateTime.now;
     // A cursor saved before keyset intake has no id and meant "from this second on".
-    if (Number.isFinite(saved))
-      return { received: Math.floor(saved / 1000), id: rows[0]?.after_id ?? 0 };
-    const since = DateTime.subtract(yield* DateTime.now, { days: 1 });
-    return { received: Math.floor(DateTime.toEpochMillis(since) / 1000), id: 0 };
+    const committed =
+      row !== undefined && Number.isFinite(Date.parse(row.after))
+        ? { received: secondOf(row.after), id: row.after_id ?? 0 }
+        : {
+            received: Math.floor(
+              DateTime.toEpochMillis(DateTime.subtract(now, { days: 1 })) / 1000,
+            ),
+            id: 0,
+          };
+    const claim =
+      row?.claim_after != null && row.claim_until != null
+        ? {
+            end: { received: secondOf(row.claim_after), id: row.claim_after_id ?? 0 },
+            holder: row.claim_holder ?? "",
+            until: row.claim_until,
+            live: Date.parse(row.claim_until) > DateTime.toEpochMillis(now),
+          }
+        : null;
+    return { committed, claim, now, saved: row !== undefined };
   });
-  // Intake and the watch share this read, so the watch opens exactly when intake has mail.
-  const pendingMail = (limit: number) =>
-    Effect.gen(function* () {
-      const after = yield* intakeCursor;
-      return { after, page: yield* host.mailIntake(after, limit, yield* selected("mail")) };
+  const atOrBefore = (a: MailIndex.MailCursor, b: MailIndex.MailCursor) =>
+    a.received < b.received || (a.received === b.received && a.id <= b.id);
+  // The watch skips mail a live hold already covers, so it does not start a run for it; once a
+  // hold expires, its batch counts as new again.
+  const watchCursor = intakeState.pipe(
+    Effect.map(({ committed, claim }) => (claim?.live ? claim.end : committed)),
+  );
+  const pendingMail = Effect.fn("NativeWorkflows.pendingMail")(function* (limit: number) {
+    const after = yield* watchCursor;
+    return { after, page: yield* host.mailIntake(after, limit, yield* selected("mail")) };
+  });
+  const writeIntake = (fields: {
+    readonly committed: MailIndex.MailCursor;
+    readonly claim: {
+      readonly end: MailIndex.MailCursor;
+      readonly holder: string;
+      readonly until: string;
+    } | null;
+  }) => {
+    const after = instant(DateTime.makeUnsafe(fields.committed.received * 1000));
+    const claimAfter =
+      fields.claim === null ? null : instant(DateTime.makeUnsafe(fields.claim.end.received * 1000));
+    const claimAfterId = fields.claim?.end.id ?? null;
+    const holder = fields.claim?.holder ?? null;
+    const until = fields.claim?.until ?? null;
+    return sql`INSERT INTO heiwa_native_intake (app, after, after_id, claim_after, claim_after_id, claim_holder, claim_until)
+      VALUES ('mail', ${after}, ${fields.committed.id}, ${claimAfter}, ${claimAfterId}, ${holder}, ${until})
+      ON CONFLICT(app) DO UPDATE SET after = excluded.after, after_id = excluded.after_id,
+        claim_after = excluded.claim_after, claim_after_id = excluded.claim_after_id,
+        claim_holder = excluded.claim_holder, claim_until = excluded.claim_until`;
+  };
+  const mailIntake = Effect.fn("NativeWorkflows.mailIntake")(function* (
+    limit: number,
+    holder: string,
+    ack: boolean,
+  ) {
+    const done = (fields: {
+      readonly records?: ReadonlyArray<NativeRecord>;
+      readonly truncated?: boolean;
+      readonly error?: string | null;
+      readonly claim?: { readonly redelivered: boolean; readonly expiresAt: string };
+    }) => ({
+      app: "mail" as const,
+      records: fields.records ?? [],
+      truncated: fields.truncated ?? false,
+      error: fields.error ?? null,
+      ...(fields.claim === undefined ? {} : { claim: fields.claim }),
     });
-  const mailIntake = Effect.fn("NativeWorkflows.mailIntake")(function* (limit: number) {
-    const result = yield* pendingMail(limit).pipe(Effect.result);
-    if (result._tag === "Failure")
-      return {
-        app: "mail" as const,
-        records: [],
-        truncated: false,
-        error: isNativeWorkflowError(result.failure)
-          ? result.failure.detail
+    const state = yield* intakeState;
+    if (ack) {
+      if (state.claim === null || state.claim.holder !== holder)
+        return done({ error: "This chat holds no unacknowledged mail." });
+      yield* writeIntake({ committed: state.claim.end, claim: null });
+      return done({});
+    }
+    if (state.claim?.live && state.claim.holder !== holder)
+      return done({ error: `Another intake run holds mail until ${state.claim.until}.` });
+    // A live hold of this chat's own (a repeated call) or an expired hold: the same batch again.
+    const redelivery = state.claim;
+    const read = yield* host
+      .mailIntake(state.committed, limit, yield* selected("mail"))
+      .pipe(Effect.result);
+    if (read._tag === "Failure")
+      return done({
+        error: isNativeWorkflowError(read.failure)
+          ? read.failure.detail
           : "This source could not be read.",
-      };
-    const { after, page } = result.success;
+      });
+    const page = read.success;
     // Oldest first within a byte budget, so a local model's context holds the batch and the
-    // cursor stops at the last message handed out; the rest arrive on the next run.
+    // hold ends at the last message handed out; the rest arrive on the next run.
     const entries = page.records.map(({ cursor, record: raw }) => {
       const record = NativeHost.nativeRecord(raw);
       const cut = record.body.length > INTAKE_BODY_CHARS;
@@ -322,26 +398,30 @@ const make = Effect.gen(function* () {
       };
     });
     const handed: typeof entries = [];
-    let bytes = 0;
-    for (const entry of entries) {
-      const size = utf8.encode(encodeJson(entry.record)).length;
-      if (handed.length > 0 && bytes + size > INTAKE_BYTES) break;
-      handed.push(entry);
-      bytes += size;
+    if (redelivery !== null) {
+      // Exactly the held batch (minus mail read or deleted since), never more.
+      for (const entry of entries) if (atOrBefore(entry.cursor, redelivery.end)) handed.push(entry);
+    } else {
+      let bytes = 0;
+      for (const entry of entries) {
+        const size = utf8.encode(encodeJson(entry.record)).length;
+        if (handed.length > 0 && bytes + size > INTAKE_BYTES) break;
+        handed.push(entry);
+        bytes += size;
+      }
     }
-    // Written on every run so the first run's lookback stays fixed instead of sliding.
-    const next = handed.at(-1)?.cursor ?? after;
-    const nextAfter = instant(DateTime.makeUnsafe(next.received * 1000));
-    yield* sql`INSERT INTO heiwa_native_intake (app, after, after_id) VALUES ('mail', ${nextAfter}, ${next.id}) ON CONFLICT(app) DO UPDATE SET after = excluded.after, after_id = excluded.after_id`;
-    return {
-      app: "mail" as const,
-      records: handed.map((entry) => entry.record),
-      truncated:
-        page.truncated ||
-        handed.length < entries.length ||
-        handed.some((entry) => entry.partial),
-      error: null,
-    };
+    const truncated =
+      page.truncated || handed.length < entries.length || handed.some((entry) => entry.partial);
+    const records = handed.map((entry) => entry.record);
+    const end = redelivery?.end ?? handed.at(-1)?.cursor;
+    if (end === undefined) {
+      // Nothing to hand out. Written once so the first run's lookback stays fixed.
+      if (!state.saved) yield* writeIntake({ committed: state.committed, claim: null });
+      return done({ truncated });
+    }
+    const expiresAt = instant(DateTime.add(state.now, { minutes: INTAKE_HOLD_MINUTES }));
+    yield* writeIntake({ committed: state.committed, claim: { end, holder, until: expiresAt } });
+    return done({ records, truncated, claim: { redelivered: redelivery !== null, expiresAt } });
   });
   const requireSelection = Effect.fn("NativeWorkflows.requireSelection")(function* (
     action: typeof NativeAction.Type,
@@ -631,7 +711,7 @@ const make = Effect.gen(function* () {
       Effect.withSpan("NativeWorkflows.hasNewMail"),
     ),
     run: Effect.fn("NativeWorkflows.run")(
-      function* (input: typeof NativeWorkflowInput.Type) {
+      function* (input: typeof NativeWorkflowInput.Type, holder = "heiwa") {
         if (input.workflow === "native-audit")
           return {
             workflow: input.workflow,
@@ -642,7 +722,7 @@ const make = Effect.gen(function* () {
           return {
             workflow: input.workflow,
             status: { ...(yield* status()), pending: [], recent: [] },
-            sources: [yield* mailIntake(input.limit ?? 10)],
+            sources: [yield* mailIntake(input.limit ?? 10, holder, input.ack === true)],
           };
         const window =
           input.start === undefined && input.end === undefined
