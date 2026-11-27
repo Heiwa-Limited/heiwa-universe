@@ -67,11 +67,11 @@
     "proper-lockfile": "4.1.2",
     "saxes": "6.0.0",
     "stream-chain": "^4.2.5",
-    "stream-json": "3.6.0",
+    "stream-json": "3.7.0",
     "undici": "catalog:",
     "yaml": "catalog:",
     "yauzl": "^3.4.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@effect/graphql-generator": "catalog:",
