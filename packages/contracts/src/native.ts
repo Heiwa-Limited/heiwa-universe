@@ -185,6 +185,19 @@ export const NativeWorkflowInput = Schema.Struct({
   /** mail-intake: this chat finished its batch; do not send it again. */
   ack: Schema.optional(Schema.Boolean),
 });
+/** A pasted excerpt, never Apple-app data: triage reads nothing and writes nothing. */
+export const NativeTriageInput = Schema.Struct({
+  excerpt: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(1000),
+    Schema.isPattern(/\S/),
+  ),
+});
+export type NativeTriageInput = typeof NativeTriageInput.Type;
+export const NativeTriageKind = Schema.Literals(["meeting", "needs-clarification", "other"]);
+export type NativeTriageKind = typeof NativeTriageKind.Type;
+export const NativeTriageResult = Schema.Struct({ kind: NativeTriageKind });
+export type NativeTriageResult = typeof NativeTriageResult.Type;
 export class NativeWorkflowError extends Schema.TaggedError<NativeWorkflowError>()(
   "NativeWorkflowError",
   {

@@ -41,3 +41,7 @@ export const ensureScratchProject = createEnvironmentRpcCommand(connectionAtomRu
   label: "heiwa:native:scratch-project",
   tag: WS_METHODS.projectsEnsureScratch,
 });
+export const nativeTriage = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "heiwa:native:triage",
+  tag: WS_METHODS.nativeTriage,
+});

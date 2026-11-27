@@ -522,8 +522,8 @@ jobs:
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
 
-  # Compiles the Swift helper the server ships for Calendar, Reminders and Files.
-  # Mirrors the build in apps/server/scripts/cli.ts. The repo has no Swift tests.
+  # Compiles the Swift helpers the server ships for Calendar, Reminders and Files, and for
+  # Apple's on-device model. Mirrors the build in apps/server/scripts/cli.ts.
   apple_native:
     name: Apple Native Helper
     runs-on: macos-latest
@@ -541,6 +541,31 @@ jobs:
           xcrun swiftc -O -parse-as-library
           native/apple/HeiwaApple.swift native/apple/HeiwaFiles.swift
           -framework EventKit -o "$RUNNER_TEMP/heiwa-apple"
+
+      # The same script the packaged build and dev runner use. The artifact must stay launchable
+      # on the app's oldest macOS, so FoundationModels has to be weak-linked behind runtime checks.
+      - name: Build and inspect the on-device model helper
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/heiwa-model"
+          sh native/apple/build-model-helper.sh "$helper"
+          [ "$(lipo -archs "$helper")" = "arm64" ] || { echo "expected arm64 only"; exit 1; }
+          xcrun vtool -show-build "$helper" | grep -Eq '^ *minos 12\.0$' || { echo "expected minos 12.0"; exit 1; }
+          if otool -L "$helper" | grep -q FoundationModels; then
+            otool -L "$helper" | grep FoundationModels | grep -q ', weak)' || { echo "FoundationModels must be weak"; exit 1; }
+          fi
+
+      # Rejected before the model is consulted, so these hold on runners without Apple Intelligence.
+      - name: Check the model helper's input bounds
+        run: |
+          set -uo pipefail
+          expect_invalid() { [ "$1" = '{"error":"invalid"}' ] || { echo "unexpected: $1"; exit 1; }; }
+          helper="$RUNNER_TEMP/heiwa-model"
+          expect_invalid "$(printf '{"task":"meeting-triage","excerpt":"   "}' | "$helper")"
+          expect_invalid "$(printf 'not json' | "$helper")"
+          expect_invalid "$(printf '{"task":"other","excerpt":"Lunch at noon."}' | "$helper")"
+          expect_invalid "$(printf '{"task":"meeting-triage","excerpt":"Lunch at noon."}' | "$helper" extra)"
+          expect_invalid "$(python3 -c 'import json; print(json.dumps({"task":"meeting-triage","excerpt":"x"*4001}))' | "$helper")"
 
   # Full history: a secret removed in a later commit is still published.
   # .gitleaksignore lists the fixtures inherited from the upstream import and

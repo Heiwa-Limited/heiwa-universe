@@ -108,6 +108,16 @@ const buildCmd = Command.make(
             { stdout: "inherit", stderr: "inherit", shell: false },
           ),
         );
+        yield* runCommand(
+          ChildProcess.make(
+            "/bin/sh",
+            [
+              path.join(repoRoot, "native/apple/build-model-helper.sh"),
+              path.join(nativeDirectory, "heiwa-model"),
+            ],
+            { stdout: "inherit", stderr: "inherit", shell: false },
+          ),
+        );
       }
       const webDist = path.join(repoRoot, "apps/web/dist");
       const clientTarget = path.join(serverDir, "dist/client");

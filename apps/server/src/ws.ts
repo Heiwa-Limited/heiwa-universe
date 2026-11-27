@@ -1,5 +1,6 @@
 import * as LocalProvision from "./provider/local/LocalProvision.ts";
 import * as NativeWorkflows from "./native/NativeWorkflows.ts";
+import * as NativeModel from "./native/NativeModel.ts";
 import * as DecisionsBridge from "./decisions/DecisionsBridge.ts";
 import {
   AuthSettingsWriteScope,
@@ -1382,6 +1383,7 @@ export const layerWsRpc = (
       const triage = yield* TriageService.TriageService;
       const localProvision = yield* LocalProvision.LocalProvision;
       const nativeWorkflows = yield* NativeWorkflows.NativeWorkflows;
+      const nativeModel = yield* NativeModel.NativeModel;
       const decisions = yield* DecisionsBridge.DecisionsBridge;
       const hostResources = yield* HostResources.HostResources;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
@@ -2224,6 +2226,8 @@ export const layerWsRpc = (
               : AuthOrchestrationReadScope,
             nativeWorkflows.run(input),
           ),
+        [WS_METHODS.nativeTriage]: (input) =>
+          authorizeEffect(AuthOrchestrationOperateScope, nativeModel.triage(input)),
         [WS_METHODS.serverProbe]: (_input) => Effect.succeed({}),
         [WS_METHODS.serverGetConfig]: (_input) =>
           loadServerConfig({ usageLimitsCommand: false, workspaceSnapshotsOnDemand: false }),
