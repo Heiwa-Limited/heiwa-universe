@@ -1,3 +1,4 @@
+import { LifeSignals } from "./life/LifeSignals.ts";
 import { LocalProvision } from "./provider/local/LocalProvision.ts";
 import { DecisionsBridge } from "./decisions/DecisionsBridge.ts";
 import { NativeWorkflows } from "./native/NativeWorkflows.ts";
@@ -484,6 +485,7 @@ it.effect("shell snapshots omit idle children and older settled threads only on 
 const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(DocumentText.DocumentText)({}),
   Layer.mock(NativeWorkflows)({}),
+  Layer.mock(LifeSignals)({}),
   Layer.mock(NativeModel)({}),
   Layer.mock(DecisionsBridge)({}),
   Layer.mock(LocalProvision)({}),

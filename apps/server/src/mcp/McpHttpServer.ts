@@ -82,6 +82,8 @@ import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolki
 
 import { NativeToolkit } from "./toolkits/native/tools.ts";
 import * as NativeHandlers from "./toolkits/native/handlers.ts";
+import { LifeToolkit } from "./toolkits/life/tools.ts";
+import * as LifeHandlers from "./toolkits/life/handlers.ts";
 
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
   HttpServerRequest.toURL(request).pipe(
@@ -1158,9 +1160,12 @@ const layerLocalToolkit = toolkitRegistration(LocalToolkit, LocalHandlers.layer)
 
 const layerNativeToolkit = toolkitRegistration(NativeToolkit, NativeHandlers.layer);
 
+const layerLifeToolkit = toolkitRegistration(LifeToolkit, LifeHandlers.layer);
+
 export const layerTools = Layer.mergeAll(
   layerLocalToolkit,
   layerNativeToolkit,
+  layerLifeToolkit,
   layerPreviewToolkit,
   layerOrchestratorToolkit,
   layerThreadToolkit,
