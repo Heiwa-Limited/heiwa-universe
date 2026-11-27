@@ -22,6 +22,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.nativeResolve]: AuthSettingsWriteScope,
   [WS_METHODS.nativeApprove]: AuthSettingsWriteScope,
   [WS_METHODS.nativePropose]: AuthOrchestrationOperateScope,
+  // Runs a model on this environment, as writing a review guide does.
+  [WS_METHODS.nativeTriage]: AuthOrchestrationOperateScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.
   [WS_METHODS.previewStopLocalServer]: AuthTerminalOperateScope,

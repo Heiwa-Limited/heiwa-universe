@@ -670,6 +670,56 @@ const prepareFirstStart = Effect.fn("dev-runner.prepareFirstStart")(function* (i
   }
 });
 
+/**
+ * Dev servers run from source, where no packaged helper sits beside the bundle. Rebuild the
+ * on-device model helper when its source is newer and point the server at it. Best effort:
+ * without Xcode, triage reports the helper as missing.
+ */
+const prepareModelHelper = Effect.fn("dev-runner.prepareModelHelper")(function* (input: {
+  readonly mode: DevMode;
+  readonly env: NodeJS.ProcessEnv;
+}) {
+  if (
+    input.mode === "dev:web" ||
+    input.env.HEIWA_MODEL_HELPER !== undefined ||
+    (yield* HostProcess.Platform) !== "darwin"
+  )
+    return;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const repoRoot = path.dirname(import.meta.dirname);
+  const script = path.join(repoRoot, "native/apple/build-model-helper.sh");
+  const output = path.join(repoRoot, "apps/server/dist/native/heiwa-model");
+  const modified = (file: string) =>
+    fs.stat(file).pipe(
+      Effect.map((info) =>
+        Option.match(info.mtime, { onNone: () => 0, onSome: (at) => at.getTime() }),
+      ),
+      Effect.orElseSucceed(() => -1),
+    );
+  const sources = [script, path.join(repoRoot, "native/apple/HeiwaModel.swift")];
+  if ((yield* modified(output)) < Math.max(...(yield* Effect.forEach(sources, modified)))) {
+    yield* fs.makeDirectory(path.dirname(output), { recursive: true }).pipe(Effect.ignore);
+    const exitCode = yield* ChildProcess.make("/bin/sh", [script, output], {
+      cwd: repoRoot,
+      stdin: "ignore",
+      stdout: "inherit",
+      stderr: "inherit",
+    }).pipe(
+      Effect.flatMap((child) => child.exitCode),
+      Effect.scoped,
+      Effect.orElseSucceed(() => -1),
+    );
+    if (exitCode !== 0) {
+      yield* Effect.logWarning(
+        "[dev-runner] could not build the on-device model helper; meeting triage will report it missing.",
+      );
+      return;
+    }
+  }
+  input.env.HEIWA_MODEL_HELPER = output;
+});
+
 interface DevRunnerCliInput {
   readonly mode: DevMode;
   readonly t3Home: string | undefined;
@@ -861,6 +911,7 @@ export const runDevRunnerWithInput = Effect.fn("dev-runner.runDevRunnerWithInput
     worktreeHome: baseDir === worktreeHome ? worktreeHome : undefined,
     env,
   });
+  yield* prepareModelHelper({ mode: input.mode, env });
 
   const args = [...(built ? BUILT_DEV_ARGS : MODE_ARGS[input.mode]), ...input.runArgs];
   const spawnCommand = yield* resolveSpawnCommand("vp", args, { env });

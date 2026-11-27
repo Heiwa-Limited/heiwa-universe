@@ -18,6 +18,8 @@ import {
   NativeWorkflowError,
   NativeWorkflowInput,
   NativeWorkflowResult,
+  NativeTriageInput,
+  NativeTriageResult,
 } from "./native.ts";
 import { DecisionAnswerInput, DecisionAnswerResult, DecisionsStatus } from "./decisions.ts";
 import {
@@ -525,6 +527,7 @@ export const WS_METHODS = {
   nativeApprove: "heiwa.native.approve",
   nativeResolve: "heiwa.native.resolve",
   nativeWorkflow: "heiwa.native.workflow",
+  nativeTriage: "heiwa.native.triage",
   decisionsStatus: "heiwa.decisions.status",
   decisionsAnswer: "heiwa.decisions.answer",
   serverRefreshProviders: "server.refreshProviders",
@@ -724,6 +727,11 @@ const WsDecisionsAnswerRpc = Rpc.make(WS_METHODS.decisionsAnswer, {
 const WsNativeWorkflowRpc = Rpc.make(WS_METHODS.nativeWorkflow, {
   payload: NativeWorkflowInput,
   success: NativeWorkflowResult,
+  error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
+});
+const WsNativeTriageRpc = Rpc.make(WS_METHODS.nativeTriage, {
+  payload: NativeTriageInput,
+  success: NativeTriageResult,
   error: Schema.Union([NativeWorkflowError, EnvironmentAuthorizationError]),
 });
 
@@ -2067,6 +2075,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsNativeResolveRpc,
   WsNativeApproveRpc,
   WsNativeWorkflowRpc,
+  WsNativeTriageRpc,
   WsDecisionsStatusRpc,
   WsDecisionsAnswerRpc,
   WsServerGetConfigRpc,
