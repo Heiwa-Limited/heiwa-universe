@@ -1,6 +1,7 @@
 import * as LocalProvision from "./provider/local/LocalProvision.ts";
 import * as NativeWorkflows from "./native/NativeWorkflows.ts";
 import * as DecisionsBridge from "./decisions/DecisionsBridge.ts";
+import * as LifeSignals from "./life/LifeSignals.ts";
 import * as NativeHost from "./native/NativeHost.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
@@ -720,6 +721,7 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(LocalProvision.layer),
   Layer.provideMerge(layerNativeWorkflows),
   Layer.provideMerge(DecisionsBridge.layer),
+  Layer.provideMerge(LifeSignals.layer),
   Layer.provideMerge(layerUsage),
   Layer.provideMerge(layerBackground),
   Layer.provideMerge(layerResourceDiagnostics),

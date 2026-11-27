@@ -1,3 +1,4 @@
+import { LifeSignals } from "../life/LifeSignals.ts";
 import { LocalProvision } from "./local/LocalProvision.ts";
 import { NativeWorkflows } from "../native/NativeWorkflows.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -51,6 +52,7 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(DeviceService)({}),
   Layer.mock(DocumentText)({}),
   Layer.mock(NativeWorkflows)({}),
+  Layer.mock(LifeSignals)({}),
   Layer.mock(LocalProvision)({}),
   Layer.mock(GitVcsDriver)({}),
   Layer.mock(GitWorkflowService)({}),

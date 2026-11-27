@@ -21,6 +21,7 @@ export function LabsSettingsPanel() {
         {/* Clerk is only mounted when this build has T3 Connect. */}
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
         <LinkedEnvironmentsRow />
+        <LifeSignalsRow />
         <SimlockHostsRow />
       </SettingsSection>
       <LegacyFeaturesSection />
@@ -144,6 +145,27 @@ function LinkedEnvironmentsRow() {
             updateSettings({ linkedEnvironmentsEnabled: Boolean(checked) })
           }
           aria-label="Linked environments"
+        />
+      }
+    />
+  );
+}
+
+function LifeSignalsRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      serverScoped
+      {...searchableSetting("life-signals")}
+      settingKeys={["lifeSignalsEnabled"]}
+      description="Let agents read who is waiting on a reply and today's activity counts on this Mac, from the local life feeder. Names, ages, mail subjects and counts only; message bodies never leave it."
+      control={
+        <ScopedSwitch
+          settingKeys={["lifeSignalsEnabled"]}
+          checked={settings.lifeSignalsEnabled}
+          onCheckedChange={(checked) => updateSettings({ lifeSignalsEnabled: Boolean(checked) })}
+          aria-label="Life signals"
         />
       }
     />

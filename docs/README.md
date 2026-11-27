@@ -17,6 +17,7 @@
 - [Use T3 Code as your default browser](./user/default-browser.md)
 - [Apple apps and approvals](./user/apple-apps.md)
 - [Decisions](./user/decisions.md)
+- [Life signals](./user/life-signals.md)
 - [Devices](./user/devices.md)
 - [Usage and limits](./user/usage.md)
 - [Product usage data](./user/telemetry.md)
